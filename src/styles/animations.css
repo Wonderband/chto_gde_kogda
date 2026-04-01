@@ -1,0 +1,143 @@
+/* ═══ ROULETTE SPIN ═══════════════════════════════════════════════════ */
+
+@keyframes roulette-decelerate {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(var(--spin-target, 1800deg)); }
+}
+
+/* ═══ FADE & SLIDE ════════════════════════════════════════════════════ */
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in-up    { animation: fadeInUp 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.fade-in       { animation: fadeIn 0.4s ease forwards; }
+.fade-in-scale { animation: fadeInScale 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.slide-down    { animation: slideDown 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+/* ═══ TIMER WARNING ═══════════════════════════════════════════════════ */
+
+@keyframes pulse-warning {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(232, 93, 36, 0.5)); }
+  50%       { filter: drop-shadow(0 0 24px rgba(232, 93, 36, 0.9)); }
+}
+
+.timer-warning-anim {
+  animation: pulse-warning 0.7s ease-in-out infinite;
+}
+
+/* ═══ SCORE FLASH ═════════════════════════════════════════════════════ */
+
+@keyframes score-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.35); }
+  70%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+.score-pop { animation: score-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+/* ═══ MODERATOR VOICE BARS ════════════════════════════════════════════ */
+
+@keyframes voice-bar-1 {
+  0%, 100% { transform: scaleY(0.2); } 50% { transform: scaleY(1); }
+}
+@keyframes voice-bar-2 {
+  0%, 100% { transform: scaleY(0.5); } 50% { transform: scaleY(0.3); }
+}
+@keyframes voice-bar-3 {
+  0%, 100% { transform: scaleY(0.8); } 50% { transform: scaleY(0.15); }
+}
+@keyframes voice-bar-4 {
+  0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(0.9); }
+}
+@keyframes voice-bar-5 {
+  0%, 100% { transform: scaleY(0.6); } 50% { transform: scaleY(0.4); }
+}
+
+.vb-1 { animation: voice-bar-1 0.55s ease-in-out infinite; }
+.vb-2 { animation: voice-bar-2 0.45s ease-in-out infinite; }
+.vb-3 { animation: voice-bar-3 0.65s ease-in-out infinite; }
+.vb-4 { animation: voice-bar-4 0.40s ease-in-out infinite; }
+.vb-5 { animation: voice-bar-5 0.50s ease-in-out infinite; }
+
+/* ═══ ENVELOPE GLOW ═══════════════════════════════════════════════════ */
+
+@keyframes envelope-glow {
+  0%, 100% { box-shadow: 0 0 12px rgba(201,168,76,0.5), inset 0 0 8px rgba(201,168,76,0.1); }
+  50%       { box-shadow: 0 0 28px rgba(201,168,76,0.9), inset 0 0 16px rgba(201,168,76,0.2); }
+}
+
+.envelope-glow { animation: envelope-glow 1.2s ease-in-out infinite; }
+
+/* ═══ RECORDING BLINK ═════════════════════════════════════════════════ */
+
+@keyframes rec-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.15; }
+}
+
+.rec-blink { animation: rec-blink 0.75s ease-in-out infinite; }
+
+/* ═══ IDLE TITLE GLOW ═════════════════════════════════════════════════ */
+
+@keyframes title-glow {
+  0%, 100% { text-shadow: 0 0 20px rgba(201,168,76,0.4), 0 0 60px rgba(201,168,76,0.1); }
+  50%       { text-shadow: 0 0 40px rgba(201,168,76,0.7), 0 0 100px rgba(201,168,76,0.25); }
+}
+
+.title-glow { animation: title-glow 3s ease-in-out infinite; }
+
+/* ═══ ARROW BOUNCE AT STOP ════════════════════════════════════════════ */
+
+@keyframes arrow-bounce {
+  0%   { transform: translateY(0); }
+  30%  { transform: translateY(6px); }
+  60%  { transform: translateY(-3px); }
+  100% { transform: translateY(0); }
+}
+
+.arrow-bounce { animation: arrow-bounce 0.4s ease-out; }
+
+/* ═══ RESULT REVEAL ═══════════════════════════════════════════════════ */
+
+@keyframes result-correct {
+  0%   { background: transparent; }
+  20%  { background: rgba(90, 184, 90, 0.25); }
+  100% { background: rgba(90, 184, 90, 0.08); }
+}
+
+@keyframes result-wrong {
+  0%   { background: transparent; }
+  20%  { background: rgba(184, 90, 90, 0.25); }
+  100% { background: rgba(184, 90, 90, 0.08); }
+}
+
+.result-correct-anim { animation: result-correct 1s ease-out forwards; }
+.result-wrong-anim   { animation: result-wrong 1s ease-out forwards; }
+
+/* ═══ GAME OVER ════════════════════════════════════════════════════════ */
+
+@keyframes victory-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.85; transform: scale(1.02); }
+}
+
+.victory-pulse { animation: victory-pulse 2s ease-in-out infinite; }
