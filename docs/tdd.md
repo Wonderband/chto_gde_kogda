@@ -1,6 +1,6 @@
 # Technical Design Document
-## «Що? Де? Коли?» — AI-Powered Home Party Game
-**Version:** 2.1 | **Updated:** Audio models research — gpt-4o-mini-transcribe replaces whisper-1
+## «Що? Де? Коли?» — AI-Powered Home Party Game (Breaking Bad Edition)
+**Version:** 3.0 | **Updated:** Realtime API architecture + bug fixes
 
 ---
 
@@ -8,9 +8,10 @@
 
 Local web app running authentic "Chto? Gde? Kogda?" game.
 Host PC runs the app, casts browser to 4K TV via WiFi (Chromecast or local IP).
-AI moderator (Voroshilov persona) manages the full game via voice.
+AI moderator (Voroshilov persona) manages the full game via live voice.
 
 **Theme:** Breaking Bad characters as "TV viewers" sending questions.
+**Stack:** React 18 + Vite, Pure CSS, no backend, single OpenAI API key.
 
 ---
 
@@ -20,237 +21,271 @@ AI moderator (Voroshilov persona) manages the full game via voice.
 |-------|-----------|-------|
 | UI | React 18 + Vite | Plain JSX, no TypeScript |
 | Styling | Pure CSS + CSS Variables | No UI libraries |
-| AI Moderator | **OpenAI Responses API** (gpt-4o) | Game brain, answer evaluation |
-| Knowledge Base | **OpenAI Vector Store** + file_search | Questions + rules stored server-side |
+| Live Moderator Voice | **OpenAI Realtime API** (gpt-4o-mini-realtime-preview) | WebRTC, tool calling |
+| Answer Evaluation (mock) | **OpenAI Responses API** (gpt-4o) | Used only in VITE_USE_MOCK=true |
 | STT | **gpt-4o-mini-transcribe** | Team answer speech-to-text |
-| TTS | **tts-1**, voice: **onyx** | Moderator voice output |
-| Mic | Web MediaRecorder API | Built into browser, no cost |
+| TTS | **tts-1**, voice: **onyx** | LISTENING announcement only |
+| Mic | Web MediaRecorder API | Built into browser |
 | TV | Chrome Cast Tab / local IP | Zero extra setup |
 
-> ⚠️ **Assistants API is deprecated** (sunset Aug 2026) — NOT used.
-> ⚠️ **whisper-1 is legacy** — replaced by gpt-4o-mini-transcribe (cheaper + better).
-> ✅ All AI services use a **single OpenAI API key**.
+> ⚠️ **Assistants API** — deprecated, NOT used.
+> ⚠️ **whisper-1** — legacy, replaced by gpt-4o-mini-transcribe.
+> ⚠️ **Chat Completions** — NOT used. Use Responses API (mock) or Realtime API (live).
+> ✅ All services use a **single OpenAI API key**.
 
 ---
 
-## 3. Audio Models Decision
-
-### STT — Speech-to-Text (team answer → text)
-
-| Model | Price/min | Quality | Decision |
-|-------|-----------|---------|----------|
-| whisper-1 | $0.006 | Good | ❌ Legacy, more expensive |
-| **gpt-4o-mini-transcribe** | **$0.003** | **Better** | ✅ **Chosen** |
-| gpt-4o-transcribe | $0.006 | Best | ❌ Overkill for party game |
-
-**Chosen: `gpt-4o-mini-transcribe`**
-- 2x cheaper than whisper-1 at equal or better quality
-- Better Russian/Ukrainian accuracy (GPT-4o family multilingual training)
-- API: POST /v1/audio/transcriptions, model: "gpt-4o-mini-transcribe"
-
-### TTS — Text-to-Speech (moderator text → voice)
-
-| Model | Price | Quality | Latency | Decision |
-|-------|-------|---------|---------|----------|
-| **tts-1** | **$15/1M chars** | Good | **~0.5s** | ✅ **Chosen** |
-| tts-1-hd | $30/1M chars | Higher | ~0.5s | ❌ 2x cost, marginal gain |
-| gpt-4o-mini-tts | ~$0.015/min | Highest | Slower | ❌ Higher latency for live game |
-
-**Chosen: `tts-1` voice: `onyx`**
-- Lowest latency (~0.5s) — critical for live game flow
-- onyx = deep authoritative male voice, perfect for Voroshilov
-- API: POST /v1/audio/speech, model: "tts-1", voice: "onyx"
-
----
-
-## 4. Architecture
+## 3. Architecture Overview
 
 ```
 BROWSER (React App)
-  ├── UI Components (Roulette, Timer, Score, QuestionCard)
-  ├── Game State Machine (React Context)
-  │     IDLE → SPINNING → READING → DISCUSSING →
-  │     LISTENING → EVALUATING → SCORING → (loop or GAME_OVER)
   │
-  ├── Voice Input Pipeline:
+  ├── UI Layer
+  │     Roulette (SVG, 13 sectors) · Timer · Scoreboard · QuestionCard
+  │
+  ├── Game State Machine (GameContext.jsx + gameStateMachine.js)
+  │     IDLE → SPINNING → READING → DISCUSSING → LISTENING
+  │          → EVALUATING → SCORING → READY → (loop or GAME_OVER)
+  │
+  ├── Realtime Moderator (services/realtime.js)   ← PRIMARY AI path
+  │     WebRTC connection to gpt-4o-mini-realtime-preview
+  │     Session 1 (Pre-question): opened during wheel SPIN via onTarget()
+  │       AI: sector → character → small talk → question → "Время!" → start_timer()
+  │     Session 2 (Post-answer): opened in EVALUATING after STT
+  │       AI: repeat answer → logic → correct answer → verdict → score → end_round()
+  │
+  ├── Voice Input Pipeline
   │     MediaRecorder (mic) → audio blob
-  │     → POST /v1/audio/transcriptions (gpt-4o-mini-transcribe)
-  │     → transcript string
+  │       → POST /v1/audio/transcriptions (gpt-4o-mini-transcribe)
+  │       → transcript string → injected into Realtime session
   │
-  ├── AI Moderator Service (services/openai.js):
-  │     game context → POST /v1/responses (gpt-4o)
-  │     ├── instructions: Voroshilov persona
-  │     ├── tools: file_search → Vector Store
-  │     ├── previous_response_id: game state continuity
-  │     └── returns: speech text OR JSON evaluation
+  ├── TTS (services/tts.js)                       ← LIMITED use
+  │     Only for: LISTENING announcement ("Стоп!" / "Досрочный ответ!")
+  │       → POST /v1/audio/speech (tts-1, onyx)
   │
-  └── Voice Output:
-        text → POST /v1/audio/speech (tts-1, onyx)
-        → audio blob → Audio() → speakers
-
-All APIs: api.openai.com — single VITE_OPENAI_API_KEY
+  └── Mock Mode (VITE_USE_MOCK=true)              ← testing only
+        Responses API (gpt-4o) for evaluation
+        buildReadScript() for local TTS question reading
 ```
 
 ---
 
-## 5. File Structure
+## 4. Realtime API — Core Architecture
 
+### Why Realtime API?
+The original architecture (TTS for every phrase) had a 3-7 second gap between wheel stopping and moderator starting to speak. Realtime API solves this by:
+1. Pre-warming the session **during the spin** (4.5s head-start via `onTarget`)
+2. AI speaks live with ~1.7s latency, no TTS pipeline needed
+3. Tool calling (`start_timer`, `end_round`) signals game state transitions precisely
+
+### Session 1 — Pre-Question
 ```
-chto_gde_kogda/
-├── .env
-├── .env.example
-├── .gitignore
-├── index.html
-├── vite.config.js
-├── package.json
-├── CLAUDE.md
-├── docs/
-│   ├── research.md
-│   ├── tdd.md                   # this file
-│   ├── system-prompt.md         # → upload to Vector Store
-│   └── questions.json           # → upload to Vector Store
-├── src/
-│   ├── main.jsx
-│   ├── App.jsx
-│   ├── components/
-│   │   ├── Roulette.jsx
-│   │   ├── Envelopes.jsx
-│   │   ├── Timer.jsx
-│   │   ├── Scoreboard.jsx
-│   │   ├── QuestionCard.jsx
-│   │   ├── ModeratorVoice.jsx
-│   │   └── Controls.jsx
-│   ├── services/
-│   │   ├── openai.js            # Responses API — game brain
-│   │   ├── transcribe.js        # gpt-4o-mini-transcribe — STT
-│   │   ├── tts.js               # tts-1 onyx — voice output
-│   │   ├── recorder.js          # MediaRecorder — mic
-│   │   └── mock.js              # mock mode for testing
-│   ├── game/
-│   │   ├── GameContext.jsx      # includes lastResponseId
-│   │   ├── gameStateMachine.js
-│   │   └── questions.js
-│   ├── data/
-│   │   ├── questions.json
-│   │   └── characters/
-│   └── styles/
-│       ├── global.css
-│       └── animations.css
-└── public/
-    └── sounds/
+onTarget(sector) fired in Roulette
+  → new RealtimeSession()
+  → SDP exchange with api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview
+  → session.update: instructions = buildPreQuestionInstructions(systemPrompt, ctx)
+  → conversation.item.create: { role: 'user', text: 'PRE_QUESTION_START' }
+  → response.create
+  → AI speaks: sector N → character → small talk → question → "Время!"
+  → AI calls start_timer() tool
+  → onToolCall('start_timer') → send(READING_DONE) immediately
+                              → closePreSession() after 800ms (audio drain)
 ```
 
----
-
-## 6. Game State Machine
-
+### Session 2 — Post-Answer
 ```
-IDLE
-  ↓ [Start]
-SPINNING       — wheel animation + волчок sound
-  ↓ [Arrow stops]
-READING        — openai.readQuestion() → tts.speak() → BB photo shown
-  ↓ [TTS finishes]
-DISCUSSING     — 60-sec timer + tick music
-  ↓ [Timer=0 or E key]
-LISTENING      — recorder.start() → mic records team answer
-  ↓ [Silence or Enter]
-EVALUATING     — transcribe(blob) → openai.evaluateAnswer() → result JSON
-  ↓
-SCORING        — tts.speak(result) → score updates
-  ↓
-SPINNING (score < 6) or GAME_OVER (score = 6)
+gameState = EVALUATING
+  → new RealtimeSession()
+  → SDP exchange
+  → session.update: instructions = buildPostAnswerInstructions(systemPrompt, ctx)
+    (ctx includes team_answer_transcript from STT)
+  → conversation.item.create: { role: 'user', text: 'POST_ANSWER_START' }
+  → response.create
+  → AI speaks: repeat answer → logic → correct answer → verdict → score
+  → AI calls end_round({ correct, who_scores, correct_answer_reveal })
+  → onToolCall('end_round', args) → wait 2500ms (audio drain)
+                                 → closePostSession()
+                                 → send(EVALUATION_DONE, { correct, who_scores: correct ? 'experts' : 'viewers', ... })
 ```
 
----
+### Tool Definitions
+```javascript
+TOOL_START_TIMER = {
+  type: 'function', name: 'start_timer',
+  description: 'Call IMMEDIATELY after saying "Время! Минута обсуждения!"',
+  parameters: { type: 'object', properties: {}, required: [] }
+}
 
-## 7. OpenAI Responses API (openai.js)
-
-### Endpoint & Auth
-```
-POST https://api.openai.com/v1/responses
-Authorization: Bearer {VITE_OPENAI_API_KEY}
-Content-Type: application/json
-```
-
-### Request
-```json
-{
-  "model": "gpt-4o",
-  "instructions": "<Voroshilov system prompt from system-prompt.md>",
-  "input": "<game context as JSON string>",
-  "previous_response_id": "<saved from previous round, null on first>",
-  "tools": [{ "type": "file_search", "vector_store_ids": ["VITE_VECTOR_STORE_ID"] }]
+TOOL_END_ROUND = {
+  type: 'function', name: 'end_round',
+  description: 'Call AFTER completing the full evaluation ritual.',
+  parameters: {
+    correct: boolean,
+    who_scores: 'experts' | 'viewers',
+    correct_answer_reveal: string
+  }
 }
 ```
 
-### State: save `response.id` → `lastResponseId` in GameContext after every call.
+### Safety Mechanism
+- 40s timeout on each session → fires `onError` → fallback to `send(READING_DONE)` or `send(EVALUATION_DONE)`
+- Pre-session `onError` in App.jsx: `send(EVENTS.READING_DONE)` to unblock game
+- Post-session `onError`: `send(EVALUATION_DONE, { correct: false, who_scores: 'viewers', ... })`
 
-### Three Call Types
+---
 
-**readQuestion(ctx)** — returns plain text for TTS
-```json
-{ "action": "read_question", "round": 4, "score": {...}, "current_question": {...} }
+## 5. Game State Machine
+
 ```
-
-**evaluateAnswer(ctx)** — returns JSON
-```json
-{ "action": "evaluate_answer", "team_transcript": "Хайзенберг", "current_question": {...} }
-→ { "correct": true, "score_delta": 1, "who_scores": "experts", "moderator_phrase": "..." }
-```
-
-**commentary(ctx)** — returns plain text for TTS
-```json
-{ "action": "commentary", "event": "score_update", "score": {...} }
+IDLE
+  ↓ [Space]
+SPINNING       onTarget(sector) → opens pre-question Realtime session (parallel)
+  ↓ [Arrow stops → SPIN_DONE]
+READING        Pre-session already speaking. READING_DONE fired by start_timer() tool
+  ↓ [READING_DONE]
+DISCUSSING     60s timer (20s for blitz). E=early answer → LISTENING
+  ↓ [TIMER_DONE or EARLY_ANSWER]
+LISTENING      TTS "Стоп!" via tts-1/onyx. MediaRecorder starts.
+  ↓ [Enter → RECORDING_DONE]
+EVALUATING     STT transcript ready. Post-answer Realtime session opens.
+  ↓ [end_round tool called → EVALUATION_DONE]
+SCORING        Real mode: no TTS (Realtime spoke). Immediately SCORING_DONE.
+  ↓ [SCORING_DONE]
+READY          Score updated. Space → next round.
+  ↓ [Space → NEXT_ROUND]
+SPINNING       (loop until score = 6)
+  ↓ [score >= 6]
+GAME_OVER      R → IDLE
 ```
 
 ---
 
-## 8. STT Service (transcribe.js)
+## 6. Blitz Round Logic
 
+Questions with `round_type: 'blitz'` come in groups of 3 sharing a `blitz_group` ID and `blitz_position` (1/2/3).
+
+```
+SPIN_DONE:
+  - Detect blitz_group
+  - Load all 3 questions from same group
+  - currentQuestion = Q1 (blitz_position: 1)
+  - blitzQueue = [Q2, Q3]
+  - Remove all 3 from questions pool
+
+SCORING_DONE:
+  - if blitzQueue.length > 0 AND who_scores === 'experts':
+      → pop Q2 from blitzQueue → READING (no score update yet)
+  - else (wrong OR final blitz question):
+      → score update → clear blitzQueue → READY
+
+Timer: 20s for blitz (60s standard)
+```
+
+---
+
+## 7. Instruction Builders (services/realtime.js)
+
+### buildPreQuestionInstructions(systemPrompt, gameContext)
+6-step instructions prepended to systemPrompt:
+1. **Announce sector N** — sector number embedded in heading to prevent AI using wrong number
+2. **Introduce character** — Breaking Bad character name/city
+3. **Short thematic touch** — 1-2 sentences related to question topic
+4. **Announce question type** — "Внимание! Вопрос!" / "Сектор Блиц!"
+5. **Read question verbatim** — exact question_text, no changes
+6. **Start timer** — "Время! Минута обсуждения!" → call start_timer()
+
+### buildPostAnswerInstructions(systemPrompt, gameContext)
+Starts at step 2 (step 1 "Стоп!" handled by TTS — no double voice):
+1. **Repeat answer** — "Знатоки отвечают: '[transcript]'"
+2. **Build logic** — 2-4 sentences, NO verdict yet, create tension
+3. **Reveal correct answer** — "Правильный ответ — [answer]"
+4. **Verdict** — "Верно!" / "К сожалению, нет."
+5. **Announce score** — current + 1 for winner
+6. **Call end_round()** — mandatory final step
+
+---
+
+## 8. Score Derivation (Important)
+
+```javascript
+// In App.jsx EVALUATING effect onToolCall:
+const correct = args.correct ?? false
+send(EVENTS.EVALUATION_DONE, {
+  correct,
+  who_scores: correct ? 'experts' : 'viewers',  // ← derived from correct, NOT args.who_scores
+  ...
+})
+```
+
+**Why:** AI verbally says correct score (e.g. 1:1) but can pass wrong `who_scores` enum in tool call. Deriving from `correct` boolean ensures score display matches verbal announcement.
+
+---
+
+## 9. Services Summary
+
+### services/realtime.js
+- `RealtimeSession` class — WebRTC lifecycle management
+- `TOOL_START_TIMER`, `TOOL_END_ROUND` — tool definitions
+- `buildPreQuestionInstructions(systemPrompt, ctx)` — pre-question instructions
+- `buildPostAnswerInstructions(systemPrompt, ctx)` — post-answer instructions
+
+### services/openai.js
+- `buildReadScript(ctx)` — local TTS script (no API call) for mock mode
+- `buildListeningScript(earlyAnswer, lang)` — "Стоп!" / "Досрочный ответ!" text
+- `readQuestion(ctx, prevId)` — wraps buildReadScript, returns { text, responseId }
+- `evaluateAnswer(ctx, prevId)` — calls Responses API (mock only)
+- `callOpenAI(ctx, prevId)` — Responses API call with file_search
+
+### services/transcribe.js
 ```
 POST https://api.openai.com/v1/audio/transcriptions
-Authorization: Bearer {VITE_OPENAI_API_KEY}
-
-FormData:
-  file: audioBlob (webm/wav from MediaRecorder)
-  model: "gpt-4o-mini-transcribe"
-  language: "ru"  (or "uk" based on VITE_GAME_LANGUAGE)
-
-Response: { "text": "Хайзенберг" }
+model: gpt-4o-mini-transcribe
+language: ru (or uk)
+→ { text: "team answer" }
 ```
 
----
-
-## 9. TTS Service (tts.js)
-
+### services/tts.js
 ```
 POST https://api.openai.com/v1/audio/speech
-Authorization: Bearer {VITE_OPENAI_API_KEY}
-Content-Type: application/json
-
-Body:
-  model: "tts-1"
-  voice: "onyx"
-  input: "<moderator speech text>"
-
-Response: audio/mpeg blob → new Audio(URL.createObjectURL(blob)) → play()
+model: tts-1, voice: onyx
+→ audio blob → Audio() → play()
 ```
+
+### services/recorder.js
+- `startRecording()` → MediaRecorder → returns recorder ref
+- `stopRecording(recorder)` → returns audio blob
+
+### services/mock.js
+- `mockEvaluateAnswer(ctx)` — returns fake evaluation JSON, handles blitz
 
 ---
 
-## 10. Vector Store Setup (One-Time Manual Setup)
+## 10. App.jsx Architecture
 
-Do this ONCE before running the app:
+Key refs:
+```javascript
+preSessionRef   // current RealtimeSession (pre-question), null when closed
+postSessionRef  // current RealtimeSession (post-answer), null when closed
+systemPromptRef // string — /system-prompt.txt loaded on mount
+timerRef        // setInterval handle for DISCUSSING timer
+recorderRef     // MediaRecorder reference
+```
 
-1. Go to platform.openai.com → Storage → Vector Stores → **Create**
-2. Name: "CHGK Game Knowledge Base"
-3. Upload these files:
-   - `docs/system-prompt.md` — Voroshilov persona + all game rules
-   - `docs/questions.json` — all questions with answers and hints
-4. Wait for indexing to complete (green status)
-5. Copy the Vector Store ID (format: `vs_...`)
-6. Add to `.env`: `VITE_VECTOR_STORE_ID=vs_...`
+Key functions:
+```javascript
+handleRouletteTarget(target)  // onTarget callback from Roulette — opens pre-session
+closePreSession()             // cleans up preSessionRef
+closePostSession()            // cleans up postSessionRef
+buildCtx(extra)               // assembles gameContext object for API calls
+tts(text)                     // wraps speak() with ttsPlaying state
+```
+
+State effects (useEffect):
+- READING: real mode → no-op (pre-session running); mock → TTS buildReadScript
+- LISTENING: TTS "Стоп!" → startRecording
+- EVALUATING: real mode → open post-session; mock → evaluateAnswer()
+- SCORING: real mode → immediately SCORING_DONE; mock → TTS moderator_phrase → SCORING_DONE
+- IDLE: close both sessions (cleanup)
 
 ---
 
@@ -261,63 +296,101 @@ Do this ONCE before running the app:
   "id": "bb_01",
   "character": "Walter White",
   "character_image": "walter.jpg",
-  "character_video": null,
   "question_ru": "...",
   "question_uk": "...",
   "answer": "Heisenberg",
   "answer_variants": ["Хайзенберг", "Heisenberg"],
   "hint_for_evaluator": "Accept any transliteration of Heisenberg",
   "round_type": "standard",
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "blitz_group": null,
+  "blitz_position": null
 }
 ```
 
-`round_type`: `standard` | `blitz` | `super_blitz` | `black_box`
+Blitz question:
+```json
+{
+  "round_type": "blitz",
+  "blitz_group": "blitz_chemistry_01",
+  "blitz_position": 1
+}
+```
 
 ---
 
-## 12. UI Color Palette
+## 12. Environment Variables
+
+```bash
+VITE_OPENAI_API_KEY=sk-...        # Single key: Realtime + Responses + STT + TTS
+VITE_VECTOR_STORE_ID=vs_...       # platform.openai.com/storage/vector-stores
+VITE_GAME_LANGUAGE=ru             # "ru" or "uk"
+VITE_USE_MOCK=false               # "true" → bypass all Realtime/Responses API
+```
+
+---
+
+## 13. Cost Per Game Session (~30 min, 10 rounds)
+
+| Service | Model | Est. Usage | Cost |
+|---------|-------|-----------|------|
+| Live Moderator | gpt-4o-mini-realtime-preview | ~20 sessions × ~45s audio | ~$0.30–0.50 |
+| Speech-to-Text | gpt-4o-mini-transcribe | ~2.5 min audio | ~$0.008 |
+| TTS (announcements) | tts-1 onyx | ~500 chars | ~$0.00001 |
+| **Total** | | | **~$0.31–0.51** |
+
+---
+
+## 14. UI Design
 
 ```css
 --bg-primary: #0a0a0a;        /* near-black studio */
---bg-table: #1a3a1a;          /* dark green baize */
 --accent-gold: #c9a84c;       /* gold accents */
 --text-primary: #f0ead6;      /* warm cream */
---text-secondary: #9a8a6a;    /* muted gold */
 --score-experts: #4a9a4a;     /* green */
 --score-viewers: #9a4a4a;     /* red */
---timer-warning: #e85d24;     /* orange last 10 sec */
+--timer-warning: #e85d24;     /* orange at 10 sec */
 ```
 
----
-
-## 13. Environment Variables
-
-```bash
-# .env — local only, never commit to git
-VITE_OPENAI_API_KEY=sk-...          # Single key: Responses + Transcribe + TTS
-VITE_VECTOR_STORE_ID=vs_...         # From platform.openai.com/storage/vector-stores
-VITE_GAME_LANGUAGE=ru               # "ru" or "uk"
-VITE_USE_MOCK=false                 # "true" for UI testing without API calls
-```
+- Dark theme, 1920×1080 reference, large fonts readable from sofa
+- Roulette: 13 sectors, SVG, only red arrow spins (CSS transform)
+- Timer: large circular countdown component
+- Scoreboard: always visible top bar
 
 ---
 
-## 14. Cost Per Game Session (~30 min, 10 questions)
+## 15. Breaking Bad Characters
 
-| Service | Model | Usage | Cost |
-|---------|-------|-------|------|
-| AI Moderator | gpt-4o Responses API | ~30 calls | ~$0.10–0.20 |
-| Speech-to-Text | gpt-4o-mini-transcribe | ~2.5 min audio | ~$0.008 |
-| Text-to-Speech | tts-1 onyx | ~4000 chars | ~$0.001 |
-| **Total** | | | **~$0.11–0.21** |
+Walter White (Albuquerque), Jesse Pinkman (Albuquerque), Saul Goodman (Albuquerque),
+Skyler White (Albuquerque), Hank Schrader (Albuquerque), Mike Ehrmantraut (Philadelphia),
+Gustavo Fring (Santiago → Albuquerque), Todd Alquist (Albuquerque)
+
+Jane Margolis: image missing (graceful fallback in QuestionCard)
 
 ---
 
-## 15. Breaking Bad Character Pool
+## 16. Git & Development Workflow
 
-Walter White, Jesse Pinkman, Saul Goodman, Skyler White,
-Hank Schrader, Mike Ehrmantraut, Gustavo Fring, Jane Margolis, Todd Alquist
+- Repo: https://github.com/Wonderband/chto_gde_kogda
+- Branch: main
+- One task = one branch or direct commit to main (small project)
+- Test before committing
+- Never commit `.env`
 
-Mix: ~50% BB trivia + ~50% general knowledge (authentic ЧДК style).
-Minimum 13 questions. Recommended 20–25.
+---
+
+## 17. Known Issues & Bug History
+
+### Fixed (deployed, needs re-testing)
+| # | Bug | Root Cause | Fix Applied |
+|---|-----|-----------|-------------|
+| 1 | Sector number wrong | AI ignoring dynamic context | Sector N embedded in ШАГ 1 heading text |
+| 2 | Audio cut off mid-phrase | session.close() removed audio element too early | 800ms delay before closePreSession; 2500ms before closePostSession |
+| 3 | Double "Стоп!" voice | TTS + Realtime both announced end of discussion | Removed ШАГ 1 from buildPostAnswerInstructions |
+| 4 | Wrong score display | AI passes wrong who_scores enum | Derive who_scores from args.correct (not enum) |
+| 5 | Game stuck on win | App.jsx sent GAME_OVER event, reducer had no handler | Always send SCORING_DONE; reducer handles game-over internally |
+| 6 | Blitz: only 1 question | SPIN_DONE didn't load full blitz group | Load all 3 at SPIN_DONE, queue remaining in blitzQueue |
+
+### Open / To Investigate
+- Architecture review pending — user wants to reassess overall approach
+- Re-test all 4 recent fixes after deployment
