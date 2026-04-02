@@ -213,3 +213,69 @@ export async function commentary(gameContext, previousResponseId = null) {
   }
   return callOpenAI({ ...gameContext, action: 'commentary' }, previousResponseId)
 }
+
+/**
+ * Fast answer evaluator — Chat-Supervisor pattern.
+ * Called when the Realtime session's validate_answer tool fires.
+ * Uses gpt-4o-mini text (no audio), no Vector Store — fast and cheap.
+ *
+ * @param {string} transcript  What the team said
+ * @param {{ question_text, correct_answer, answer_variants, hint_for_evaluator }} question
+ * @returns {{ correct: boolean, correct_answer: string }}
+ */
+export async function evaluateAnswerFast(transcript, question) {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
+  if (!apiKey) throw new Error('VITE_OPENAI_API_KEY not set')
+
+  const variantsLine = question.answer_variants?.length
+    ? `Accepted variants: ${question.answer_variants.join(', ')}`
+    : ''
+  const hintLine = question.hint_for_evaluator
+    ? `Evaluator hint: ${question.hint_for_evaluator}`
+    : ''
+
+  const prompt = [
+    'You are evaluating a team answer in the game "What? Where? When?".',
+    '',
+    `Question: ${question.question_text}`,
+    `Correct answer: ${question.correct_answer}`,
+    variantsLine,
+    hintLine,
+    '',
+    `Team's answer: "${transcript}"`,
+    '',
+    'Is the team\'s answer essentially correct? Accept semantic matches, reasonable transliterations, and partial answers that capture the key fact.',
+    'Respond ONLY with valid JSON on a single line: {"correct":true,"correct_answer":"exact answer text"}',
+  ].filter(Boolean).join('\n')
+
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model: 'gpt-4o-mini', input: prompt }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`evaluateAnswerFast error ${response.status}: ${err}`)
+  }
+
+  const data = await response.json()
+  let text = data.output_text || ''
+  if (!text && Array.isArray(data.output)) {
+    for (const item of data.output) {
+      if (item?.type === 'message' && Array.isArray(item.content)) {
+        for (const c of item.content) {
+          if (c?.type === 'output_text' || c?.type === 'text') { text = c.text; break }
+        }
+      }
+      if (text) break
+    }
+  }
+
+  const match = text.match(/\{[\s\S]*?\}/)
+  if (!match) throw new Error('evaluateAnswerFast: invalid JSON: ' + text)
+  return JSON.parse(match[0])
+}

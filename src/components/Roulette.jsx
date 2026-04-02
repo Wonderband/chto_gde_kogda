@@ -135,11 +135,24 @@ export default function Roulette({ spinning, onStop, onTarget, selectedSector })
   useEffect(() => {
     if (spinning && !isAnimating) {
       setIsAnimating(true)
-      const target   = Math.floor(Math.random() * SECTORS)
+      const raw            = Math.floor(Math.random() * SECTORS)
+      // Walk clockwise until we find an unplayed sector (envelope still present)
+      let target = raw
+      for (let i = 0; i < SECTORS; i++) {
+        if (!openedSectors.has(target)) break
+        target = (target + 1) % SECTORS
+      }
       onTarget?.(target)                               // fires ~4.5 s before onStop
-      const spins    = (8 + Math.floor(Math.random() * 5)) * 360
-      const finalRot = spins + arrowRotForSector(target)
-      setArrowAngle(prev => prev + finalRot)
+      const spins          = (8 + Math.floor(Math.random() * 5)) * 360
+      const targetAbsAngle = arrowRotForSector(target)
+
+      setArrowAngle(prev => {
+        // Normalize current angle to [0, 360) so we compute a clean delta
+        const currentNorm = ((prev % 360) + 360) % 360
+        let delta = targetAbsAngle - currentNorm
+        if (delta <= 0) delta += 360   // always spin clockwise, at least one full turn
+        return prev + spins + delta
+      })
 
       const dur = 4500 + Math.random() * 800
       spinTimer.current = setTimeout(() => {

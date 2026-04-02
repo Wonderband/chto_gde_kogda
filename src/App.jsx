@@ -7,17 +7,19 @@ import Timer from './components/Timer'
 import QuestionCard from './components/QuestionCard'
 import ModeratorVoice from './components/ModeratorVoice'
 import Controls from './components/Controls'
-import { readQuestion, evaluateAnswer, buildListeningScript } from './services/openai'
+import { readQuestion, evaluateAnswer, evaluateAnswerFast } from './services/openai'
 import {
   RealtimeSession,
+  PRE_SESSION_TIMEOUT,
+  ANSWER_SESSION_TIMEOUT,
+  TOOL_START_QUESTION_READING,
   TOOL_START_TIMER,
+  TOOL_VALIDATE_ANSWER,
   TOOL_END_ROUND,
   buildPreQuestionInstructions,
-  buildPostAnswerInstructions,
+  buildAnswerSessionInstructions,
 } from './services/realtime'
 import { speak } from './services/tts'
-import { startRecording, stopRecording } from './services/recorder'
-import { transcribeAudio } from './services/transcribe'
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
@@ -27,7 +29,7 @@ const STATE_LABELS = {
   [STATES.SPINNING]:   'Крутимо волчок...',
   [STATES.READING]:    'Ведучий читає питання',
   [STATES.DISCUSSING]: 'Хвилина обговорення!',
-  [STATES.LISTENING]:  'Мікрофон увімкнено — відповідайте!',
+  [STATES.LISTENING]:  'Ведучий приймає відповідь...',
   [STATES.EVALUATING]: 'Оцінюємо відповідь...',
   [STATES.SCORING]:    null,
   [STATES.READY]:      null,
@@ -42,25 +44,22 @@ function Game() {
   const [timerSec, setTimerSec]     = useState(60)
   const [paused, setPaused]         = useState(false)
   const [ttsPlaying, setTtsPlaying] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
+  const [micLive, setMicLive]       = useState(false)   // true when Realtime session has mic in dialog mode
   const [selectedSector, setSelectedSector] = useState(null)
 
-  // Reset selectedSector (and thus Roulette openedSectors) on new game
   useEffect(() => {
     if (gameState === STATES.IDLE) setSelectedSector(null)
   }, [gameState])
 
-  const timerRef      = useRef(null)
-  const recorderRef   = useRef(null)
-  const preSessionRef = useRef(null)   // Realtime pre-question session
-  const postSessionRef = useRef(null)  // Realtime post-answer session
-  const systemPromptRef = useRef(null) // cached system-prompt.txt text
-  const selectedSectorRef = useRef(null)
+  const timerRef             = useRef(null)
+  const preSessionRef        = useRef(null)   // Realtime pre-question session
+  const postSessionRef       = useRef(null)   // Realtime answer session
+  const systemPromptRef      = useRef(null)   // cached /system-prompt.txt
+  const selectedSectorRef    = useRef(null)
+  const micStreamRef         = useRef(null)   // MediaStream from getUserMedia (mic)
+  const validateCallIdRef    = useRef(null)   // callId of pending validate_answer tool call
 
-  // Keep selectedSectorRef in sync (needed inside onTarget callback)
-  useEffect(() => {
-    selectedSectorRef.current = selectedSector
-  }, [selectedSector])
+  useEffect(() => { selectedSectorRef.current = selectedSector }, [selectedSector])
 
   // Load system prompt once on mount
   useEffect(() => {
@@ -69,6 +68,15 @@ function Game() {
       .then(t => { systemPromptRef.current = t })
       .catch(() => { systemPromptRef.current = '' })
   }, [])
+
+  // Request mic permission on first game start (IDLE → SPINNING transition)
+  useEffect(() => {
+    if (gameState === STATES.SPINNING && !USE_MOCK && !micStreamRef.current) {
+      navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        .then(stream => { micStreamRef.current = stream })
+        .catch(err => console.warn('[Mic] Permission denied or unavailable:', err))
+    }
+  }, [gameState])
 
   // ─── Timer ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -88,7 +96,7 @@ function Game() {
     if (gameState === STATES.DISCUSSING) { setTimerSec(timerDuration); setPaused(false) }
   }, [gameState])
 
-  // ─── TTS helper ───────────────────────────────────────────────────
+  // ─── TTS helper (mock mode only) ─────────────────────────────────
   async function tts(text) {
     setTtsPlaying(true)
     try { await speak(text) }
@@ -129,12 +137,13 @@ function Game() {
   function closePostSession() {
     postSessionRef.current?.close()
     postSessionRef.current = null
+    setMicLive(false)
+    validateCallIdRef.current = null
   }
 
   /**
    * Called by Roulette ~4.5 s before the wheel stops.
-   * Opens the pre-question Realtime session so AI is ready (or already speaking)
-   * by the time READING state fires.
+   * Opens the pre-question Realtime session in DIALOG mode.
    */
   function handleRouletteTarget(target) {
     if (USE_MOCK) return
@@ -143,14 +152,11 @@ function Game() {
 
     closePreSession()
 
-    // Build a preliminary context for the AI (currentQuestion may not be set
-    // yet since SPIN_DONE hasn't fired, so use state.questions[0])
-    const pendingQ   = state.questions[0]
-    const sectorNum  = target + 1
-    let introQ = pendingQ
+    const pendingQ  = state.questions[0]
+    const sectorNum = target + 1
+    let introQ      = pendingQ
 
     if (pendingQ?.round_type === 'blitz') {
-      // For blitz, find position-1 question so the intro is correct
       const pos1 = state.questions.find(
         q => q.blitz_group === pendingQ.blitz_group && q.blitz_position === 1
       )
@@ -176,19 +182,25 @@ function Game() {
       early_answer: false,
     }
 
-    const session = new RealtimeSession()
+    const session = new RealtimeSession({ timeout: PRE_SESSION_TIMEOUT })
 
-    session.onToolCall = (name) => {
-      if (name === 'start_timer') {
-        send(EVENTS.READING_DONE)                   // start timer immediately
-        setTimeout(() => closePreSession(), 800)    // let audio tail drain first
+    session.onToolCall = (name, _args, callId) => {
+      if (name === 'start_question_reading') {
+        // Switch to monologue, then tell AI to read the question
+        session.setDialogMode(false)
+        session.sendToolOutput(callId, 'READ_QUESTION_NOW')
+        setMicLive(false)
+      } else if (name === 'start_timer') {
+        session.sendToolOutput(callId, 'acknowledged')
+        send(EVENTS.READING_DONE)
+        setTimeout(() => closePreSession(), 800)
       }
     }
 
     session.onError = (err) => {
       console.error('[Pre-session error]', err.message)
+      setMicLive(false)
       closePreSession()
-      // Fallback: let READING effect handle it via TTS
       if (gameState === STATES.READING || gameState === STATES.SPINNING) {
         send(EVENTS.READING_DONE)
       }
@@ -197,27 +209,24 @@ function Game() {
     session.open({
       apiKey,
       instructions: buildPreQuestionInstructions(systemPromptRef.current, preCtx),
-      tools: [TOOL_START_TIMER],
+      tools: [TOOL_START_QUESTION_READING, TOOL_START_TIMER],
       voice: 'echo',
-      triggerText: 'PRE_QUESTION_START',
+      triggerText: 'НАЧНИ РАУНД',
+      micStream: micStreamRef.current,
+      dialogMode: true,
     })
 
     preSessionRef.current = session
+    setMicLive(true)
   }
 
   // ─── State side-effects ───────────────────────────────────────────
 
-  // READING: real mode — pre-session already running; mock mode — TTS
+  // READING: pre-session already speaking in real mode; TTS in mock mode
   useEffect(() => {
     if (gameState === STATES.READING && currentQuestion) {
-      if (!USE_MOCK) {
-        // Realtime session was pre-warmed during spin.
-        // Just set a safety timeout in case AI never calls start_timer.
-        // (The session's own SESSION_TIMEOUT handles that, but also guard here.)
-        return
-      }
+      if (!USE_MOCK) return  // pre-session handles it
 
-      // Mock / TTS fallback
       let cancelled = false
       ;(async () => {
         try {
@@ -232,146 +241,167 @@ function Game() {
     }
   }, [gameState, currentQuestion])
 
-  // LISTENING: real mode — open post-answer Realtime session after STT
-  // mock mode — existing TTS + recorder flow
+  // LISTENING: open answer session (real mode) or TTS+recorder fallback (mock)
   useEffect(() => {
-    if (gameState === STATES.LISTENING) {
-      if (!USE_MOCK) {
-        // In real mode we still need to capture the team's spoken answer via STT,
-        // then feed it to the post-answer Realtime session.
-        // Announce stop/early-answer via TTS first, then record.
-        ;(async () => {
-          try {
-            const lang   = import.meta.env.VITE_GAME_LANGUAGE || 'ru'
-            const script = buildListeningScript(state.earlyAnswer, lang)
-            await tts(script)
-            setIsRecording(true)
-            recorderRef.current = await startRecording()
-          } catch (e) {
-            console.error(e)
-            send(EVENTS.RECORDING_DONE, '')
-          }
-        })()
-      } else {
-        // Mock mode
-        ;(async () => {
-          try {
-            const lang   = import.meta.env.VITE_GAME_LANGUAGE || 'ru'
-            const script = buildListeningScript(state.earlyAnswer, lang)
-            await tts(script)
-            setIsRecording(true)
-            recorderRef.current = await startRecording()
-          } catch (e) {
-            console.error(e)
-            send(EVENTS.RECORDING_DONE, '')
-          }
-        })()
+    if (gameState !== STATES.LISTENING) return
+
+    if (!USE_MOCK) {
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY
+      if (!apiKey || !systemPromptRef.current) {
+        send(EVENTS.RECORDING_DONE, '')
+        return
       }
-    } else {
-      setIsRecording(false)
+
+      closePostSession()
+
+      const answerCtx = {
+        ...buildCtx({ early_answer: state.earlyAnswer }),
+      }
+
+      const session = new RealtimeSession({ timeout: ANSWER_SESSION_TIMEOUT })
+
+      session.onToolCall = (name, args, callId) => {
+        if (name === 'validate_answer') {
+          // Store callId so EVALUATING effect can send the result back
+          validateCallIdRef.current = callId
+          // Transition to EVALUATING with the heard answer as transcript
+          send(EVENTS.RECORDING_DONE, args.answer || '')
+        } else if (name === 'end_round') {
+          session.sendToolOutput(callId, 'acknowledged')
+          const correct = args.correct ?? false
+          setTimeout(() => {
+            closePostSession()
+            send(EVENTS.EVALUATION_DONE, {
+              correct,
+              score_delta: 1,
+              who_scores: correct ? 'experts' : 'viewers',
+              moderator_phrase: '',
+              correct_answer_reveal: args.correct_answer_reveal ?? currentQuestion?.answer ?? '?',
+            })
+          }, 2500)
+        }
+      }
+
+      session.onError = (err) => {
+        console.error('[Answer session error]', err.message)
+        closePostSession()
+        // If we never got an answer, skip to evaluation with empty transcript
+        if (gameState === STATES.LISTENING) {
+          send(EVENTS.RECORDING_DONE, '')
+        } else {
+          send(EVENTS.EVALUATION_DONE, {
+            correct: false, score_delta: 1, who_scores: 'viewers',
+            moderator_phrase: '',
+            correct_answer_reveal: currentQuestion?.answer || '?',
+          })
+        }
+      }
+
+      session.open({
+        apiKey,
+        instructions: buildAnswerSessionInstructions(systemPromptRef.current, answerCtx),
+        tools: [TOOL_VALIDATE_ANSWER, TOOL_END_ROUND],
+        voice: 'echo',
+        triggerText: 'НАЧНИ ПРИЁМ ОТВЕТА',
+        micStream: micStreamRef.current,
+        dialogMode: true,
+      })
+
+      postSessionRef.current = session
+      setMicLive(true)
+      return
     }
+
+    // Mock mode: TTS announcement + fake recording
+    ;(async () => {
+      try {
+        const lang   = import.meta.env.VITE_GAME_LANGUAGE || 'ru'
+        const script = state.earlyAnswer
+          ? (lang === 'uk' ? 'Достроковa відповідь! Пане капітане, слухаємо вас.' : 'Досрочный ответ! Господин капитан, слушаем вас.')
+          : (lang === 'uk' ? 'Стоп! Час! Пане капітане, хто відповідає?' : 'Стоп! Время! Господин капитан, кто отвечает?')
+        await tts(script)
+        setMicLive(true)
+      } catch (e) { console.error(e) }
+    })()
   }, [gameState])
 
   // EVALUATING:
-  //   real mode — open post-answer Realtime session; it handles evaluation + scoring
-  //   mock mode — call evaluateAnswer() API (mock)
+  //   real mode — answer session is already open (postSessionRef); send evaluation result to it
+  //   mock mode — call mock evaluateAnswer()
   useEffect(() => {
-    if (gameState === STATES.EVALUATING) {
-      if (!USE_MOCK) {
-        // Real mode: open Realtime post-answer session
-        const apiKey = import.meta.env.VITE_OPENAI_API_KEY
-        if (!apiKey || !systemPromptRef.current) {
-          // Fallback if keys not set
-          send(EVENTS.EVALUATION_DONE, {
-            correct: false, score_delta: 1, who_scores: 'viewers',
-            moderator_phrase: '',
-            correct_answer_reveal: currentQuestion?.answer || '?',
-          })
-          return
-        }
+    if (gameState !== STATES.EVALUATING) return
 
-        closePostSession()
+    if (!USE_MOCK) {
+      const callId    = validateCallIdRef.current
+      const transcript = state.transcript
+      const question   = buildCtx().current_question
 
-        const postCtx = {
-          ...buildCtx({ team_answer_transcript: state.transcript }),
-          early_answer: state.earlyAnswer,
-        }
-
-        const session = new RealtimeSession()
-
-        session.onToolCall = (name, args) => {
-          if (name === 'end_round') {
-            // Give AI a moment to finish speaking, then advance state
-            setTimeout(() => {
-              closePostSession()
-              const correct = args.correct ?? false
-              send(EVENTS.EVALUATION_DONE, {
-                correct,
-                score_delta:           1,
-                // Derive from correct — don't trust AI's who_scores (it can diverge from verbal)
-                who_scores:            correct ? 'experts' : 'viewers',
-                moderator_phrase:      '',   // Realtime already spoke it live
-                correct_answer_reveal: args.correct_answer_reveal ?? currentQuestion?.answer ?? '?',
-              })
-            }, 2500)
-          }
-        }
-
-        session.onError = (err) => {
-          console.error('[Post-session error]', err.message)
-          closePostSession()
-          send(EVENTS.EVALUATION_DONE, {
-            correct: false, score_delta: 1, who_scores: 'viewers',
-            moderator_phrase: '',
-            correct_answer_reveal: currentQuestion?.answer || '?',
-          })
-        }
-
-        session.open({
-          apiKey,
-          instructions: buildPostAnswerInstructions(systemPromptRef.current, postCtx),
-          tools: [TOOL_END_ROUND],
-          voice: 'echo',
-          triggerText: 'POST_ANSWER_START',
+      if (!callId || !postSessionRef.current) {
+        // Fallback if session died before we got here
+        send(EVENTS.EVALUATION_DONE, {
+          correct: false, score_delta: 1, who_scores: 'viewers',
+          moderator_phrase: '',
+          correct_answer_reveal: currentQuestion?.answer || '?',
         })
-
-        postSessionRef.current = session
         return
       }
 
-      // Mock mode
+      // Switch to monologue for the ritual, then send evaluation result
       ;(async () => {
         try {
-          const { evaluation: result, responseId } = await evaluateAnswer(
-            buildCtx({ team_answer_transcript: state.transcript }),
-            lastResponseId
-          )
-          if (responseId) send('SET_LAST_RESPONSE_ID', responseId)
-          send(EVENTS.EVALUATION_DONE, result)
-        } catch (e) {
-          console.error(e)
-          send(EVENTS.EVALUATION_DONE, {
-            correct: false, score_delta: 1, who_scores: 'viewers',
-            moderator_phrase: 'Відповідь не зараховано.',
-            correct_answer_reveal: currentQuestion?.answer || '?',
-          })
+          const result = await evaluateAnswerFast(transcript, question)
+          postSessionRef.current?.setDialogMode(false)
+          setMicLive(false)
+          // sendToolOutput with afterRitual=true → session will call onRitualDone when ritual response.done fires
+          postSessionRef.current?.sendToolOutput(callId, JSON.stringify(result), true)
+          validateCallIdRef.current = null
+
+          // When the ritual response.done fires, switch back to dialog for post-verdict chat
+          postSessionRef.current.onRitualDone = () => {
+            postSessionRef.current?.setDialogMode(true)
+            setMicLive(true)
+          }
+        } catch (err) {
+          console.error('[evaluateAnswerFast]', err)
+          // Fallback evaluation
+          const fallback = { correct: false, correct_answer: currentQuestion?.answer || '?' }
+          postSessionRef.current?.setDialogMode(false)
+          postSessionRef.current?.sendToolOutput(callId, JSON.stringify(fallback), true)
+          validateCallIdRef.current = null
         }
       })()
+      return
     }
+
+    // Mock mode
+    ;(async () => {
+      try {
+        const { evaluation: result, responseId } = await evaluateAnswer(
+          buildCtx({ team_answer_transcript: state.transcript }),
+          lastResponseId
+        )
+        if (responseId) send('SET_LAST_RESPONSE_ID', responseId)
+        send(EVENTS.EVALUATION_DONE, result)
+      } catch (e) {
+        console.error(e)
+        send(EVENTS.EVALUATION_DONE, {
+          correct: false, score_delta: 1, who_scores: 'viewers',
+          moderator_phrase: 'Відповідь не зараховано.',
+          correct_answer_reveal: currentQuestion?.answer || '?',
+        })
+      }
+    })()
   }, [gameState])
 
   // SCORING:
-  //   real mode — Realtime already spoke verdict; skip TTS, just advance
-  //   mock mode — play moderator_phrase via TTS then advance
+  //   real mode — Realtime already spoke; advance immediately
+  //   mock mode — play moderator_phrase then advance
   useEffect(() => {
     if (gameState === STATES.SCORING && evaluation) {
       if (!USE_MOCK) {
-        // Realtime session handled speech; advance immediately
         send(EVENTS.SCORING_DONE)
         return
       }
-
-      // Mock mode
       ;(async () => {
         try { await tts(evaluation.moderator_phrase) }
         catch (e) { console.error(e) }
@@ -380,7 +410,7 @@ function Game() {
     }
   }, [gameState, evaluation])
 
-  // Clean up both Realtime sessions when game goes back to IDLE
+  // Clean up both sessions when game returns to IDLE
   useEffect(() => {
     if (gameState === STATES.IDLE) {
       closePreSession()
@@ -388,29 +418,30 @@ function Game() {
     }
   }, [gameState])
 
-  // ─── Stop recording helper ────────────────────────────────────────
-  const doStopRecording = useCallback(async () => {
-    if (!isRecording) return
-    setIsRecording(false)
-    try {
-      const blob = await stopRecording(recorderRef.current)
-      recorderRef.current = null
-      const transcript = await transcribeAudio(blob)
-      send(EVENTS.RECORDING_DONE, transcript)
-    } catch (e) {
-      console.error(e)
-      send(EVENTS.RECORDING_DONE, '')
+  // ─── WRAP_UP: stop recording (mock) or end post-verdict dialog (real) ────────
+  const doMockStopRecording = useCallback(async () => {
+    if (!micLive) return
+    setMicLive(false)
+    // Mock mode: just send empty transcript to trigger RECORDING_DONE
+    send(EVENTS.RECORDING_DONE, '')
+  }, [micLive, send])
+
+  const doWrapUp = useCallback(() => {
+    if (postSessionRef.current) {
+      postSessionRef.current.sendTextMessage('WRAP_UP')
     }
-  }, [isRecording, send])
+  }, [])
 
   // ─── Global keyboard handler ──────────────────────────────────────
-  const gameStateRef   = useRef(gameState)
-  const isRecordingRef = useRef(isRecording)
-  const doStopRef      = useRef(doStopRecording)
+  const gameStateRef    = useRef(gameState)
+  const micLiveRef      = useRef(micLive)
+  const doMockStopRef   = useRef(doMockStopRecording)
+  const doWrapUpRef     = useRef(doWrapUp)
 
-  useEffect(() => { gameStateRef.current   = gameState },      [gameState])
-  useEffect(() => { isRecordingRef.current = isRecording },    [isRecording])
-  useEffect(() => { doStopRef.current      = doStopRecording }, [doStopRecording])
+  useEffect(() => { gameStateRef.current  = gameState },             [gameState])
+  useEffect(() => { micLiveRef.current    = micLive },               [micLive])
+  useEffect(() => { doMockStopRef.current = doMockStopRecording },   [doMockStopRecording])
+  useEffect(() => { doWrapUpRef.current   = doWrapUp },              [doWrapUp])
 
   useEffect(() => {
     function onKey(e) {
@@ -421,8 +452,10 @@ function Game() {
       switch (e.code) {
         case 'Space':
           e.preventDefault()
-          if (gs === STATES.IDLE)  send(EVENTS.START)
-          if (gs === STATES.READY) send(EVENTS.NEXT_ROUND)
+          if (gs === STATES.IDLE)       send(EVENTS.START)
+          if (gs === STATES.READY)      send(EVENTS.NEXT_ROUND)
+          // In EVALUATING: send WRAP_UP to post-session (end post-verdict dialog)
+          if (gs === STATES.EVALUATING) doWrapUpRef.current()
           break
 
         case 'KeyE':
@@ -436,8 +469,9 @@ function Game() {
 
         case 'Enter':
           e.preventDefault()
-          if (gs === STATES.LISTENING && isRecordingRef.current) {
-            doStopRef.current()
+          // Mock mode: stop recording
+          if (gs === STATES.LISTENING && USE_MOCK && micLiveRef.current) {
+            doMockStopRef.current()
           }
           break
 
@@ -471,9 +505,9 @@ function Game() {
         <div className="status-strip">
           <div className="status-left">
             <ModeratorVoice playing={ttsPlaying} />
-            {isRecording && (
+            {micLive && (
               <div className="rec-badge">
-                <span className="rec-dot rec-blink">●</span> Запис...
+                <span className="rec-dot rec-blink">●</span> Мікрофон
               </div>
             )}
           </div>
@@ -529,11 +563,29 @@ function Game() {
               {showTimer && (
                 <div className="timer-column">
                   <Timer seconds={timerSec} maxSeconds={timerDuration} paused={paused} />
-                  {gameState === STATES.LISTENING && (
-                    <div className="listen-hint">Говоріть відповідь</div>
-                  )}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ── LISTENING hint ── */}
+        {gameState === STATES.LISTENING && (
+          <div className="listen-overlay fade-in">
+            <div className="listen-hint">
+              {USE_MOCK
+                ? <span>Говоріть відповідь — <kbd>Enter</kbd> щоб зупинити</span>
+                : <span>Ведучий слухає відповідь...</span>
+              }
+            </div>
+          </div>
+        )}
+
+        {/* ── EVALUATING hint ── */}
+        {gameState === STATES.EVALUATING && !USE_MOCK && (
+          <div className="listen-overlay fade-in">
+            <div className="listen-hint">
+              Натисніть <kbd>Пробіл</kbd> коли готові до наступного раунду
             </div>
           </div>
         )}
@@ -700,12 +752,28 @@ function Game() {
           gap: 0.8rem;
           padding-top: 1.5rem;
         }
+
+        /* ── LISTENING / EVALUATING overlay ── */
+        .listen-overlay {
+          position: absolute;
+          bottom: 3rem;
+          left: 50%;
+          transform: translateX(-50%);
+        }
         .listen-hint {
           font-size: var(--font-label);
-          color: var(--timer-warning);
+          color: var(--accent-gold);
           letter-spacing: 0.08em;
           text-align: center;
-          animation: rec-blink 1s ease-in-out infinite;
+          opacity: 0.8;
+        }
+        .listen-hint kbd {
+          padding: 0.1rem 0.5rem;
+          border: 1px solid var(--border-gold);
+          border-radius: 4px;
+          background: rgba(201,168,76,0.08);
+          color: var(--accent-gold);
+          font-family: monospace;
         }
 
         /* ── GAME OVER ── */
