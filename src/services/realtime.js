@@ -33,16 +33,6 @@ export const ANSWER_SESSION_TIMEOUT = 300_000  // ms — answer session max (dia
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
-export const TOOL_START_QUESTION_READING = {
-  type: 'function',
-  name: 'start_question_reading',
-  description:
-    'Call IMMEDIATELY after saying "Внимание! Вопрос!" (RU) or "Увага! Питання!" (UK) ' +
-    'to signal you are done with small talk and ready to read the question. ' +
-    'The system will switch to monologue mode and send READ_QUESTION_NOW.',
-  parameters: { type: 'object', properties: {}, required: [] },
-}
-
 export const TOOL_START_TIMER = {
   type: 'function',
   name: 'start_timer',
@@ -107,9 +97,12 @@ export const TOOL_END_ROUND = {
  * Phase 1 (monologue, after READ_QUESTION_NOW received): question → start_timer()
  */
 export function buildPreQuestionInstructions(systemPrompt, gameContext) {
-  const isRu = gameContext.game_language !== 'uk'
-  const q    = gameContext.current_question || {}
-  const pos  = q.blitz_position || 1
+  const isRu   = gameContext.game_language !== 'uk'
+  const q      = gameContext.current_question || {}
+  const pos    = q.blitz_position || 1
+  const players = gameContext.player_names?.length
+    ? gameContext.player_names
+    : (isRu ? ['уважаемые знатоки'] : ['шановні знавці'])
 
   const blitzPosLabel = isRu
     ? (['Первый', 'Второй', 'Третий'][pos - 1] || `${pos}-й`)
@@ -143,26 +136,22 @@ export function buildPreQuestionInstructions(systemPrompt, gameContext) {
 ВАЖНО: произнеси именно число ${gameContext.sector_number}.
 
 **ШАГ 2 — Представь телезрителя:**
-Персонаж: ${q.character || 'Неизвестный'}
+Скажи, что вопрос прислал персонаж: ${q.character || 'Неизвестный'}.
+ВАЖНО: ${q.character || 'этот персонаж'} — это ТЕЛЕЗРИТЕЛЬ (автор вопроса), а не игрок за столом.
+Ты НЕ разговариваешь с ${q.character || 'персонажем'} — ты разговариваешь с живыми игроками за столом.
 
-**ШАГ 3 — Небольшой разговор с игроками** (1-2 реплики):
-Задай короткий вопрос, связанный с темой или персонажем. Выслушай ответ. Прокомментируй.
-НЕ раскрывай текст вопроса и правильный ответ!
+**ШАГ 3 — ОДИН короткий вопрос игроку** (строго одна реплика):
+Игроки за столом: ${players.join(', ')}.
+Выбери одного игрока по имени и задай ему ОДИН короткий вопрос по теме (о сериале, персонаже или теме вопроса).
+НЕ раскрывай текст вопроса!
+Пример: «${players[0]}, вы смотрели Breaking Bad?» или «${players[0]}, назовите одного персонажа сериала?»
+После того как игрок ответил (или промолчал) — СРАЗУ переходи к шагу 4. Не жди второго ответа.
 
-**ШАГ 4 — Объяви переход к вопросу:**
-${questionAnnounce}
-Сразу после этих слов — вызови start_question_reading(). НЕ читай вопрос до ответа системы.
-
-### ФАЗА 1 — МОНОЛОГ (после получения сообщения READ_QUESTION_NOW)
-
-Система переключит режим. Когда получишь READ_QUESTION_NOW — выполни:
-
-**ШАГ 5 — Прочитай вопрос ДОСЛОВНО** (без изменений, без комментариев):
-«${q.question_text || ''}»
-
-**ШАГ 6 — Запусти таймер:**
-Скажи ${timerPhrase} — и НЕМЕДЛЕННО вызови start_timer().
-После вызова start_timer() — замолчи.
+**ШАГ 4 — ПЕРЕХОД К ВОПРОСУ:**
+Скажи: ${questionAnnounce}
+Сразу вызови start_question_reading() — это сигнал системе переключить режим.
+Можешь также не вызывать инструмент — система переключится автоматически.
+После ${questionAnnounce} замолчи и жди. Текст вопроса придёт от системы.
 
 ---
 
@@ -288,11 +277,12 @@ export class RealtimeSession {
       }
 
       if (micStream) {
-        // sendrecv — we send mic audio AND receive AI audio
-        this._pc.addTransceiver('audio', { direction: 'sendrecv' })
-        micStream.getAudioTracks().forEach(track => this._pc.addTrack(track, micStream))
+        const tracks = micStream.getAudioTracks()
+        console.log(`[RealtimeSession] addTrack sendrecv — ${tracks.length} audio track(s):`,
+          tracks.map(t => `"${t.label}" enabled=${t.enabled} state=${t.readyState}`))
+        tracks.forEach(track => this._pc.addTrack(track, micStream))
       } else {
-        // recvonly — only receive AI audio
+        console.log('[RealtimeSession] No mic stream — recvonly transceiver')
         this._pc.addTransceiver('audio', { direction: 'recvonly' })
       }
 
@@ -335,6 +325,7 @@ export class RealtimeSession {
    * Switch between dialog mode (VAD=server_vad) and monologue mode (VAD=null).
    */
   setDialogMode(enabled) {
+    console.log('[RealtimeSession] setDialogMode:', enabled, '→ turn_detection:', enabled ? 'server_vad' : 'null')
     this._send({
       type: 'session.update',
       session: {
@@ -380,6 +371,10 @@ export class RealtimeSession {
   _configure(instructions, tools, voice, triggerText, dialogMode) {
     if (this._closed || this._dc?.readyState !== 'open') return
 
+    console.log('[RealtimeSession] _configure — dialogMode:', dialogMode,
+      '| turn_detection:', dialogMode ? 'server_vad' : 'null',
+      '| tools:', tools.map(t => t.name))
+
     this._send({
       type: 'session.update',
       session: {
@@ -389,7 +384,7 @@ export class RealtimeSession {
         tool_choice: 'auto',
         turn_detection: dialogMode ? { type: 'server_vad' } : null,
         modalities: ['text', 'audio'],
-        ...(dialogMode ? { input_audio_transcription: { model: 'gpt-4o-mini-transcribe' } } : {}),
+        ...(dialogMode ? { input_audio_transcription: { model: 'whisper-1' } } : {}),
       },
     })
 
@@ -403,6 +398,24 @@ export class RealtimeSession {
 
   _onEvent(event) {
     if (this._closed) return
+
+    if (event.type === 'session.created') {
+      console.log('[RealtimeSession] session.created — id:', event.session?.id)
+    }
+
+    if (event.type === 'session.updated') {
+      const vad = event.session?.turn_detection
+      console.log('[RealtimeSession] session.updated — turn_detection:',
+        vad ? `${vad.type} (threshold=${vad.threshold ?? 'default'})` : 'null (monologue)')
+    }
+
+    if (event.type === 'input_audio_buffer.speech_started') {
+      console.log('[RealtimeSession] 🎤 speech_started — AI hears player speaking')
+    }
+
+    if (event.type === 'input_audio_buffer.speech_stopped') {
+      console.log('[RealtimeSession] 🎤 speech_stopped')
+    }
 
     if (event.type === 'response.function_call_arguments.done') {
       const name = event.name

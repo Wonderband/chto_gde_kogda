@@ -12,7 +12,6 @@ import {
   RealtimeSession,
   PRE_SESSION_TIMEOUT,
   ANSWER_SESSION_TIMEOUT,
-  TOOL_START_QUESTION_READING,
   TOOL_START_TIMER,
   TOOL_VALIDATE_ANSWER,
   TOOL_END_ROUND,
@@ -58,6 +57,9 @@ function Game() {
   const selectedSectorRef    = useRef(null)
   const micStreamRef         = useRef(null)   // MediaStream from getUserMedia (mic)
   const validateCallIdRef    = useRef(null)   // callId of pending validate_answer tool call
+  const dialogTimerRef       = useRef(null)   // 55s fallback timer to force monologue switch
+  const introQRef            = useRef(null)   // current round question (for triggerReadQuestion)
+  const triggerReadQRef      = useRef(null)   // stable ref to triggerReadQuestion callback
 
   useEffect(() => { selectedSectorRef.current = selectedSector }, [selectedSector])
 
@@ -69,14 +71,18 @@ function Game() {
       .catch(() => { systemPromptRef.current = '' })
   }, [])
 
-  // Request mic permission on first game start (IDLE → SPINNING transition)
+  // Request mic permission on mount so stream is ready before the first spin
   useEffect(() => {
-    if (gameState === STATES.SPINNING && !USE_MOCK && !micStreamRef.current) {
-      navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-        .then(stream => { micStreamRef.current = stream })
-        .catch(err => console.warn('[Mic] Permission denied or unavailable:', err))
-    }
-  }, [gameState])
+    if (USE_MOCK) return
+    console.log('[Mic] Requesting getUserMedia on mount...')
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then(stream => {
+        console.log('[Mic] Stream ready on mount, tracks:', stream.getAudioTracks().length,
+          stream.getAudioTracks().map(t => `${t.label} enabled=${t.enabled} state=${t.readyState}`))
+        micStreamRef.current = stream
+      })
+      .catch(err => console.warn('[Mic] Permission denied or unavailable:', err))
+  }, [])
 
   // ─── Timer ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -103,10 +109,14 @@ function Game() {
     finally { setTtsPlaying(false) }
   }
 
+  const playerNames = (import.meta.env.VITE_PLAYER_NAMES || '')
+    .split(',').map(n => n.trim()).filter(Boolean)
+
   function buildCtx(extra = {}) {
     return {
       round_number: roundNumber,
       score,
+      player_names: playerNames,
       current_question: currentQuestion ? {
         id: currentQuestion.id,
         character: currentQuestion.character,
@@ -129,7 +139,69 @@ function Game() {
 
   // ─── Realtime helpers ─────────────────────────────────────────────
 
+  /** Mute or unmute the shared mic track at the browser level. */
+  function muteSessionMic(muted) {
+    micStreamRef.current?.getAudioTracks().forEach(t => {
+      t.enabled = !muted
+      console.log(`[Mic] track "${t.label}" enabled=${t.enabled}`)
+    })
+  }
+
+  /**
+   * Switch the pre-question session from dialog → monologue and send the question.
+   * Three entry points: AI calls start_question_reading tool (toolCallId set),
+   * host presses Enter, or 55s dialog timer fires.
+   */
+  const triggerReadQuestion = useCallback((toolCallId = null) => {
+    const session = preSessionRef.current
+    if (!session) return
+    clearTimeout(dialogTimerRef.current)
+    console.log('[triggerReadQuestion]', toolCallId ? 'AI tool call' : 'app trigger (key/timer)')
+
+    // Physically mute mic so no audio reaches server during monologue
+    micStreamRef.current?.getAudioTracks().forEach(t => {
+      t.enabled = false
+      console.log(`[Mic] muted "${t.label}" for monologue`)
+    })
+    session.setDialogMode(false)
+    setMicLive(false)
+
+    const lang   = import.meta.env.VITE_GAME_LANGUAGE || 'ru'
+    const isRu   = lang !== 'uk'
+    const q      = introQRef.current
+    const qText  = lang === 'uk' ? q?.question_uk : q?.question_ru
+    const timerPhrase = q?.round_type === 'blitz'
+      ? (isRu ? '«Время! Двадцать секунд!»' : '«Час! Двадцять секунд!»')
+      : (isRu ? '«Время! Минута обсуждения!»' : '«Час! Хвилина обговорення!»')
+
+    const msg = isRu
+      ? `МОНОЛОГ РЕЖИМ АКТИВИРОВАН. Микрофон отключён.
+
+Выполни СТРОГО И ТОЛЬКО ЭТО:
+Прочитай вопрос ДОСЛОВНО:
+«${qText || ''}»
+
+Затем немедленно скажи ${timerPhrase} и вызови start_timer().
+НЕ добавляй ни слова. НЕ жди реакции. Только вопрос → таймер.`
+      : `МОНОЛОГ РЕЖИМ АКТИВОВАНО. Мікрофон вимкнений.
+
+Виконай СТРОГО:
+Прочитай питання ДОСЛІВНО:
+«${qText || ''}»
+
+Потім одразу скажи ${timerPhrase} і виклич start_timer().`
+
+    if (toolCallId) {
+      session.sendToolOutput(toolCallId, msg)
+    } else {
+      session.sendTextMessage(msg)
+    }
+  }, [])
+
+  useEffect(() => { triggerReadQRef.current = triggerReadQuestion }, [triggerReadQuestion])
+
   function closePreSession() {
+    clearTimeout(dialogTimerRef.current)
     preSessionRef.current?.close()
     preSessionRef.current = null
   }
@@ -138,6 +210,7 @@ function Game() {
     postSessionRef.current?.close()
     postSessionRef.current = null
     setMicLive(false)
+    muteSessionMic(true)
     validateCallIdRef.current = null
   }
 
@@ -145,10 +218,25 @@ function Game() {
    * Called by Roulette ~4.5 s before the wheel stops.
    * Opens the pre-question Realtime session in DIALOG mode.
    */
-  function handleRouletteTarget(target) {
+  async function handleRouletteTarget(target) {
     if (USE_MOCK) return
     const apiKey = import.meta.env.VITE_OPENAI_API_KEY
     if (!apiKey || !systemPromptRef.current) return
+
+    // Ensure mic stream is available — normally ready from mount, but await if not
+    if (!micStreamRef.current) {
+      console.warn('[handleRouletteTarget] Mic not ready yet — requesting now (fallback)')
+      try {
+        micStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        console.log('[handleRouletteTarget] Fallback mic obtained, tracks:', micStreamRef.current.getAudioTracks().length)
+      } catch (err) {
+        console.warn('[handleRouletteTarget] Mic unavailable — session will be recvonly:', err)
+      }
+    } else {
+      console.log('[handleRouletteTarget] Mic stream ready, tracks:',
+        micStreamRef.current.getAudioTracks().length,
+        micStreamRef.current.getAudioTracks().map(t => `${t.label} enabled=${t.enabled} state=${t.readyState}`))
+    }
 
     closePreSession()
 
@@ -164,14 +252,18 @@ function Game() {
     }
 
     const lang   = import.meta.env.VITE_GAME_LANGUAGE || 'ru'
+
+    // Store introQ for triggerReadQuestion (called later via timer/key/tool)
+    introQRef.current = introQ
+
+    // question_text omitted from preCtx — AI receives it only when monologue is triggered
     const preCtx = {
       round_number: roundNumber + 1,
       score,
+      player_names: playerNames,
       current_question: introQ ? {
         id: introQ.id,
         character: introQ.character,
-        question_text: lang === 'uk' ? introQ.question_uk : introQ.question_ru,
-        correct_answer: introQ.answer,
         round_type: introQ.round_type,
         blitz_position: introQ.blitz_position,
         blitz_group: introQ.blitz_group,
@@ -185,12 +277,7 @@ function Game() {
     const session = new RealtimeSession({ timeout: PRE_SESSION_TIMEOUT })
 
     session.onToolCall = (name, _args, callId) => {
-      if (name === 'start_question_reading') {
-        // Switch to monologue, then tell AI to read the question
-        session.setDialogMode(false)
-        session.sendToolOutput(callId, 'READ_QUESTION_NOW')
-        setMicLive(false)
-      } else if (name === 'start_timer') {
+      if (name === 'start_timer') {
         session.sendToolOutput(callId, 'acknowledged')
         send(EVENTS.READING_DONE)
         setTimeout(() => closePreSession(), 800)
@@ -206,10 +293,11 @@ function Game() {
       }
     }
 
+    muteSessionMic(false)  // ensure mic is live when dialog session opens
     session.open({
       apiKey,
       instructions: buildPreQuestionInstructions(systemPromptRef.current, preCtx),
-      tools: [TOOL_START_QUESTION_READING, TOOL_START_TIMER],
+      tools: [TOOL_START_TIMER],
       voice: 'echo',
       triggerText: 'НАЧНИ РАУНД',
       micStream: micStreamRef.current,
@@ -218,6 +306,12 @@ function Game() {
 
     preSessionRef.current = session
     setMicLive(true)
+
+    // 55s fallback: if AI never calls start_question_reading, force the switch
+    dialogTimerRef.current = setTimeout(() => {
+      console.log('[dialogTimer] 55s elapsed — auto-triggering monologue')
+      triggerReadQRef.current()
+    }, 55_000)
   }
 
   // ─── State side-effects ───────────────────────────────────────────
@@ -297,6 +391,7 @@ function Game() {
         }
       }
 
+      muteSessionMic(false)  // ensure mic is live when dialog session opens
       session.open({
         apiKey,
         instructions: buildAnswerSessionInstructions(systemPromptRef.current, answerCtx),
@@ -350,6 +445,7 @@ function Game() {
       ;(async () => {
         try {
           const result = await evaluateAnswerFast(transcript, question)
+          muteSessionMic(true)   // physically mute mic before monologue
           postSessionRef.current?.setDialogMode(false)
           setMicLive(false)
           // sendToolOutput with afterRitual=true → session will call onRitualDone when ritual response.done fires
@@ -358,6 +454,7 @@ function Game() {
 
           // When the ritual response.done fires, switch back to dialog for post-verdict chat
           postSessionRef.current.onRitualDone = () => {
+            muteSessionMic(false)  // unmute mic for post-verdict dialog
             postSessionRef.current?.setDialogMode(true)
             setMicLive(true)
           }
@@ -365,6 +462,7 @@ function Game() {
           console.error('[evaluateAnswerFast]', err)
           // Fallback evaluation
           const fallback = { correct: false, correct_answer: currentQuestion?.answer || '?' }
+          muteSessionMic(true)
           postSessionRef.current?.setDialogMode(false)
           postSessionRef.current?.sendToolOutput(callId, JSON.stringify(fallback), true)
           validateCallIdRef.current = null
@@ -469,7 +567,11 @@ function Game() {
 
         case 'Enter':
           e.preventDefault()
-          // Mock mode: stop recording
+          // Real mode: trigger question reading during dialog phase
+          if ((gs === STATES.SPINNING || gs === STATES.READING) && !USE_MOCK) {
+            triggerReadQRef.current()
+          }
+          // Mock mode: stop recording during LISTENING
           if (gs === STATES.LISTENING && USE_MOCK && micLiveRef.current) {
             doMockStopRef.current()
           }
