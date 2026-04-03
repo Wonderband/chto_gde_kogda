@@ -56,10 +56,11 @@ function Game() {
   const systemPromptRef      = useRef(null)   // cached /system-prompt.txt
   const selectedSectorRef    = useRef(null)
   const micStreamRef         = useRef(null)   // MediaStream from getUserMedia (mic)
-  const validateCallIdRef    = useRef(null)   // callId of pending validate_answer tool call
-  const dialogTimerRef       = useRef(null)   // 55s fallback timer to force monologue switch
-  const introQRef            = useRef(null)   // current round question (for triggerReadQuestion)
-  const triggerReadQRef      = useRef(null)   // stable ref to triggerReadQuestion callback
+  const validateCallIdRef      = useRef(null)   // callId of pending validate_answer tool call
+  const dialogTimerRef         = useRef(null)   // 50s fallback timer to force monologue switch
+  const introQRef              = useRef(null)   // current round question (for triggerReadQuestion)
+  const triggerReadQRef        = useRef(null)   // stable ref to triggerReadQuestion callback
+  const postVerdictActiveRef   = useRef(false)  // true after ritual done, guards WRAP_UP timing
 
   useEffect(() => { selectedSectorRef.current = selectedSector }, [selectedSector])
 
@@ -149,20 +150,18 @@ function Game() {
 
   /**
    * Switch the pre-question session from dialog → monologue and send the question.
-   * Three entry points: AI calls start_question_reading tool (toolCallId set),
-   * host presses Enter, or 55s dialog timer fires.
+   * Entry points: transcript trigger (auto), host presses Enter, or 50s fallback timer.
    */
-  const triggerReadQuestion = useCallback((toolCallId = null) => {
+  const triggerReadQuestion = useCallback(() => {
     const session = preSessionRef.current
     if (!session) return
     clearTimeout(dialogTimerRef.current)
-    console.log('[triggerReadQuestion]', toolCallId ? 'AI tool call' : 'app trigger (key/timer)')
+    session.onTranscriptDelta = null   // stop watching transcript
+    session.onResponseDone    = null   // stop waiting for response.done
+    console.log('[triggerReadQuestion] switching pre-session to monologue')
 
-    // Physically mute mic so no audio reaches server during monologue
-    micStreamRef.current?.getAudioTracks().forEach(t => {
-      t.enabled = false
-      console.log(`[Mic] muted "${t.label}" for monologue`)
-    })
+    // Mute mic first, then switch VAD off — order matters
+    muteSessionMic(true)
     session.setDialogMode(false)
     setMicLive(false)
 
@@ -191,10 +190,20 @@ function Game() {
 
 Потім одразу скажи ${timerPhrase} і виклич start_timer().`
 
-    if (toolCallId) {
-      session.sendToolOutput(toolCallId, msg)
-    } else {
-      session.sendTextMessage(msg)
+    session.clearAudioBuffer()
+    session.cancelResponse()         // cancel any active response before injecting (defensive)
+    session.injectSystemMessage(msg)
+
+    // Drive READING_DONE from response.audio.done — fires when server finishes streaming audio.
+    // Use this (not response.done) so we don't fire early before the question is fully spoken.
+    // closePreSession with a 3s delay to let the buffered audio finish playing.
+    session.onAudioDone = () => {
+      session.onAudioDone    = null
+      session.onResponseDone = null
+      console.log('[triggerReadQuestion] audio done → READING_DONE')
+      send(EVENTS.READING_DONE)
+      // Keep session alive so buffered audio finishes playing (15s covers any question length)
+      setTimeout(() => closePreSession(), 15_000)
     }
   }, [])
 
@@ -209,6 +218,7 @@ function Game() {
   function closePostSession() {
     postSessionRef.current?.close()
     postSessionRef.current = null
+    postVerdictActiveRef.current = false
     setMicLive(false)
     muteSessionMic(true)
     validateCallIdRef.current = null
@@ -278,9 +288,8 @@ function Game() {
 
     session.onToolCall = (name, _args, callId) => {
       if (name === 'start_timer') {
+        // Just ack — READING_DONE is driven by response.done (set in triggerReadQuestion)
         session.sendToolOutput(callId, 'acknowledged')
-        send(EVENTS.READING_DONE)
-        setTimeout(() => closePreSession(), 800)
       }
     }
 
@@ -307,11 +316,44 @@ function Game() {
     preSessionRef.current = session
     setMicLive(true)
 
-    // 55s fallback: if AI never calls start_question_reading, force the switch
+    // Watch AI transcript for the question-announce turn.
+    // Strategy: accumulate text per response turn (reset on response.done).
+    // ШАГ 4 is the ONLY turn containing BOTH announcement words — works for all variants:
+    //   RU: "Внимание! Вопрос!" / "Внимание! Первый вопрос!" / "Внимание! Второй вопрос!" etc.
+    //   UK: "Увага! Питання!" / "Увага! Перше питання!" etc.
+    // On match: wait for response.done before injecting (can't inject mid-response).
+    const isRu = lang !== 'uk'
+    const triggerWord1 = isRu ? 'нимание' : 'вага'   // suffix to tolerate capitalisation variance
+    const triggerWord2 = isRu ? 'вопрос'  : 'питання'
+    let transcriptAccum = ''
+    let triggerPending  = false
+
+    session.onTranscriptDelta = (delta) => {
+      transcriptAccum += delta.toLowerCase()
+      if (!triggerPending
+          && transcriptAccum.includes(triggerWord1)
+          && transcriptAccum.includes(triggerWord2)) {
+        triggerPending = true
+        session.onTranscriptDelta = null
+        console.log('[transcript] question-announce detected — waiting for response.done')
+      }
+    }
+
+    session.onResponseDone = () => {
+      if (triggerPending) {
+        session.onResponseDone = null
+        console.log('[transcript] response.done → switching to monologue')
+        triggerReadQRef.current()
+      } else {
+        transcriptAccum = ''   // clear per-turn buffer so ШАГ 1 "нимание" doesn't bleed into next turn
+      }
+    }
+
+    // 50s fallback: force switch even if phrase was never detected
     dialogTimerRef.current = setTimeout(() => {
-      console.log('[dialogTimer] 55s elapsed — auto-triggering monologue')
+      console.log('[dialogTimer] 50s elapsed — force switching to monologue')
       triggerReadQRef.current()
-    }, 55_000)
+    }, 50_000)
   }
 
   // ─── State side-effects ───────────────────────────────────────────
@@ -361,6 +403,7 @@ function Game() {
           // Transition to EVALUATING with the heard answer as transcript
           send(EVENTS.RECORDING_DONE, args.answer || '')
         } else if (name === 'end_round') {
+          console.log('[postSession] end_round called — correct:', args.correct)
           session.sendToolOutput(callId, 'acknowledged')
           const correct = args.correct ?? false
           setTimeout(() => {
@@ -379,8 +422,8 @@ function Game() {
       session.onError = (err) => {
         console.error('[Answer session error]', err.message)
         closePostSession()
-        // If we never got an answer, skip to evaluation with empty transcript
-        if (gameState === STATES.LISTENING) {
+        // Use gameStateRef (not stale closure gameState) to dispatch the right fallback event
+        if (gameStateRef.current === STATES.LISTENING) {
           send(EVENTS.RECORDING_DONE, '')
         } else {
           send(EVENTS.EVALUATION_DONE, {
@@ -454,6 +497,9 @@ function Game() {
 
           // When the ritual response.done fires, switch back to dialog for post-verdict chat
           postSessionRef.current.onRitualDone = () => {
+            postSessionRef.current.onRitualDone = null  // fire once only
+            console.log('[postSession] ritual done → back to dialog')
+            postVerdictActiveRef.current = true   // now safe to send WRAP_UP
             muteSessionMic(false)  // unmute mic for post-verdict dialog
             postSessionRef.current?.setDialogMode(true)
             setMicLive(true)
@@ -526,7 +572,10 @@ function Game() {
 
   const doWrapUp = useCallback(() => {
     if (postSessionRef.current) {
+      console.log('[doWrapUp] sending WRAP_UP to post-session')
       postSessionRef.current.sendTextMessage('WRAP_UP')
+    } else {
+      console.warn('[doWrapUp] no post-session open')
     }
   }, [])
 
@@ -552,8 +601,8 @@ function Game() {
           e.preventDefault()
           if (gs === STATES.IDLE)       send(EVENTS.START)
           if (gs === STATES.READY)      send(EVENTS.NEXT_ROUND)
-          // In EVALUATING: send WRAP_UP to post-session (end post-verdict dialog)
-          if (gs === STATES.EVALUATING) doWrapUpRef.current()
+          // In EVALUATING: send WRAP_UP only after ritual is done (post-verdict dialog active)
+          if (gs === STATES.EVALUATING && postVerdictActiveRef.current) doWrapUpRef.current()
           break
 
         case 'KeyE':

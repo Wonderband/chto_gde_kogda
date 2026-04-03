@@ -148,10 +148,9 @@ export function buildPreQuestionInstructions(systemPrompt, gameContext) {
 После того как игрок ответил (или промолчал) — СРАЗУ переходи к шагу 4. Не жди второго ответа.
 
 **ШАГ 4 — ПЕРЕХОД К ВОПРОСУ:**
-Скажи: ${questionAnnounce}
-Сразу вызови start_question_reading() — это сигнал системе переключить режим.
-Можешь также не вызывать инструмент — система переключится автоматически.
-После ${questionAnnounce} замолчи и жди. Текст вопроса придёт от системы.
+Произнеси: ${questionAnnounce}
+После этого немедленно замолчи и жди. Система автоматически переключит режим и пришлёт текст вопроса.
+НЕ добавляй ничего лишнего — только произнеси фразу выше и жди следующего сообщения.
 
 ---
 
@@ -249,11 +248,17 @@ export class RealtimeSession {
     this._afterRitual = false   // true after validate_answer result is sent → track response.done
 
     /** (name: string, args: object, callId: string) => void */
-    this.onToolCall    = null
+    this.onToolCall      = null
     /** (error: Error) => void */
-    this.onError       = null
+    this.onError         = null
     /** () => void — fires after AI response.done following evaluate result (ritual complete) */
-    this.onRitualDone  = null
+    this.onRitualDone    = null
+    /** (delta: string) => void — fires on each response.audio_transcript.delta chunk */
+    this.onTranscriptDelta = null
+    /** () => void — fires on every response.done (after ritual check) */
+    this.onResponseDone    = null
+    /** () => void — fires when AI audio streaming is complete (response.audio.done) */
+    this.onAudioDone       = null
   }
 
   /**
@@ -366,6 +371,38 @@ export class RealtimeSession {
     this._send({ type: 'response.create' })
   }
 
+  /**
+   * Cancel the currently active AI response (if any).
+   * Use before injecting a new response when an active response may be in progress.
+   */
+  cancelResponse() {
+    this._send({ type: 'response.cancel' })
+  }
+
+  /**
+   * Flush server-side audio input buffer.
+   * Call before switching to monologue to discard any ambient player noise.
+   */
+  clearAudioBuffer() {
+    this._send({ type: 'input_audio_buffer.clear' })
+  }
+
+  /**
+   * Inject a system-role message (visible to the model, NOT spoken aloud)
+   * and request a response. Used to deliver question text + instructions silently.
+   */
+  injectSystemMessage(text) {
+    this._send({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text }],
+      },
+    })
+    this._send({ type: 'response.create' })
+  }
+
   // ── Private ──────────────────────────────────────────────────────────────────
 
   _configure(instructions, tools, voice, triggerText, dialogMode) {
@@ -417,6 +454,16 @@ export class RealtimeSession {
       console.log('[RealtimeSession] 🎤 speech_stopped')
     }
 
+    if (event.type === 'response.audio.done') {
+      if (typeof this.onAudioDone === 'function') this.onAudioDone()
+    }
+
+    if (event.type === 'response.audio_transcript.delta') {
+      if (typeof this.onTranscriptDelta === 'function') {
+        this.onTranscriptDelta(event.delta ?? '')
+      }
+    }
+
     if (event.type === 'response.function_call_arguments.done') {
       const name = event.name
       let args = {}
@@ -433,10 +480,15 @@ export class RealtimeSession {
         this._afterRitual = false
         if (typeof this.onRitualDone === 'function') this.onRitualDone()
       }
+      if (typeof this.onResponseDone === 'function') this.onResponseDone()
     }
 
     if (event.type === 'error') {
       console.error('[RealtimeSession] API error:', event.error)
+      // response_cancel_not_active: cancelResponse() called when already idle — benign
+      if (event.error?.code === 'response_cancel_not_active') return
+      // conversation_already_has_active_response: response.create sent mid-response — benign
+      if (event.error?.code === 'conversation_already_has_active_response') return
       this._handleError(new Error(event.error?.message || 'Realtime API error'))
     }
   }
