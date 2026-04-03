@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Session 1 Flow — Pre-Question Round</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    padding: 24px;
+    min-width: 1200px;
+  }
+
+  h1 {
+    color: #f0c040;
+    font-size: 20px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .subtitle {
+    color: #666;
+    font-size: 12px;
+    margin-bottom: 28px;
+    letter-spacing: 1px;
+  }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+    padding: 12px 16px;
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 4px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #aaa;
+  }
+
+  .legend-line {
+    width: 32px;
+    height: 2px;
+    border-radius: 1px;
+  }
+
+  .legend-line.rtc   { background: #4a9eff; }
+  .legend-line.dc    { background: #a0f0a0; }
+  .legend-line.audio { background: #f0a040; border-top: 2px dashed #f0a040; height: 0; }
+  .legend-line.state { background: #e06060; }
+  .legend-line.event { background: #c080f0; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+  }
+
+  /* ── Main diagram ── */
+  .diagram {
+    display: grid;
+    grid-template-columns: 60px 1fr 1fr 1fr 1fr;
+    gap: 0;
+    position: relative;
+  }
+
+  /* Lane headers */
+  .lane-header {
+    text-align: center;
+    padding: 12px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid;
+    margin-bottom: 0;
+  }
+
+  .lane-header.time  { color: #555; border-color: #222; background: #0a0a0a; }
+  .lane-header.app   { color: #4a9eff; border-color: #4a9eff; background: #0d1520; }
+  .lane-header.rt    { color: #a0f0a0; border-color: #a0f0a0; background: #0d150d; }
+  .lane-header.api   { color: #f0c040; border-color: #f0c040; background: #15120a; }
+  .lane-header.play  { color: #e06060; border-color: #e06060; background: #150d0d; }
+
+  .lane-header .sub {
+    font-size: 10px;
+    font-weight: normal;
+    color: #666;
+    margin-top: 3px;
+  }
+
+  /* Phase bands */
+  .phase-band {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    padding: 5px 8px 5px 68px;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-left: 4px solid;
+    margin: 2px 0;
+  }
+
+  .phase-band.phase0 { background: #0f1520; color: #4a9eff; border-color: #4a9eff; }
+  .phase-band.phase1 { background: #0d1a0d; color: #60c060; border-color: #60c060; }
+  .phase-band.phase1b{ background: #0d1a0d; color: #60c060; border-color: #60c060; }
+  .phase-band.phase2 { background: #1a1400; color: #f0c040; border-color: #f0c040; }
+  .phase-band.phase3 { background: #1a0d00; color: #f0a040; border-color: #f0a040; }
+  .phase-band.phase4 { background: #1a0a0a; color: #e06060; border-color: #e06060; }
+
+  .phase-band .mode-badge {
+    margin-left: 12px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: bold;
+  }
+  .mode-dialog  { background: #1a3a1a; color: #80e080; border: 1px solid #40a040; }
+  .mode-mono    { background: #3a2a00; color: #f0b040; border: 1px solid #c08020; }
+
+  /* Row layout */
+  .row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 60px 1fr 1fr 1fr 1fr;
+    align-items: stretch;
+    min-height: 32px;
+    border-bottom: 1px solid #111;
+  }
+
+  .row:hover { background: rgba(255,255,255,0.02); }
+
+  .cell {
+    padding: 4px 10px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+  }
+
+  .cell.time {
+    color: #444;
+    font-size: 11px;
+    justify-content: center;
+    border-right: 1px solid #1a1a1a;
+  }
+
+  /* Lane column borders */
+  .cell:nth-child(2) { border-right: 1px solid #1a2a1a; }
+  .cell:nth-child(3) { border-right: 1px solid #1a2a1a; }
+  .cell:nth-child(4) { border-right: 1px solid #1a2a1a; }
+
+  /* Vertical lane tints */
+  .cell-app  { background: rgba(74,158,255,0.03); }
+  .cell-rt   { background: rgba(160,240,160,0.03); }
+  .cell-api  { background: rgba(240,192,64,0.03); }
+  .cell-play { background: rgba(224,96,96,0.03); }
+
+  /* Message bubbles / arrows */
+  .msg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    line-height: 1.3;
+    max-width: 100%;
+    word-break: break-word;
+  }
+
+  .msg-dc    { background: #0d200d; border: 1px solid #306030; color: #a0f0a0; }
+  .msg-rtc   { background: #0d1830; border: 1px solid #2a5090; color: #7ab8ff; }
+  .msg-audio { background: #201400; border: 1px solid #603000; color: #f0a040; }
+  .msg-state { background: #200808; border: 1px solid #601010; color: #ff8080; }
+  .msg-event { background: #180820; border: 1px solid #502070; color: #d090ff; }
+  .msg-app   { background: #080818; border: 1px solid #202060; color: #8080e0; }
+  .msg-warn  { background: #201000; border: 1px solid #604010; color: #d0a040; }
+  .msg-ok    { background: #081808; border: 1px solid #205020; color: #60c060; }
+  .msg-key   { background: #180820; border: 1px solid #503070; color: #c090ff; }
+
+  /* Arrow spans across lanes */
+  .arrow-right::after { content: ' →'; opacity: 0.7; }
+  .arrow-left::after  { content: ' ←'; opacity: 0.7; }
+  .arrow-down::after  { content: ' ↓'; opacity: 0.7; }
+
+  /* Spanning messages (drawn as full-row) */
+  .span-row {
+    grid-column: 1 / -1;
+    padding: 3px 8px 3px 68px;
+  }
+
+  .span-msg {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .label {
+    font-size: 10px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  code {
+    background: #181818;
+    border: 1px solid #282828;
+    border-radius: 2px;
+    padding: 1px 5px;
+    font-size: 11px;
+    color: #e8e0b0;
+  }
+
+  /* Override / safety section */
+  .overrides {
+    margin-top: 32px;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .overrides-title {
+    background: #111;
+    padding: 10px 16px;
+    color: #888;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #222;
+  }
+
+  .override-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .override-table th {
+    background: #0f0f0f;
+    color: #666;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 14px;
+    text-align: left;
+    border-bottom: 1px solid #1a1a1a;
+  }
+
+  .override-table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid #111;
+    font-size: 12px;
+    vertical-align: middle;
+  }
+
+  .override-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .trigger-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+  }
+  .t-auto   { background: #0d200d; border: 1px solid #306030; color: #80e080; }
+  .t-manual { background: #0d1830; border: 1px solid #2a5090; color: #7ab8ff; }
+  .t-timer  { background: #200808; border: 1px solid #601010; color: #ff8080; }
+  .t-safety { background: #1a0800; border: 1px solid #603010; color: #e08040; }
+</style>
+</head>
+<body>
+
+<h1>Session 1 — Pre-Question Round Flow</h1>
+<p class="subtitle">From wheel spin → dialog intro → mode switch → question reading → 60s discussion timer</p>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item">
+    <div class="legend-line rtc"></div> WebRTC / SDP
+  </div>
+  <div class="legend-item">
+    <div class="legend-line dc"></div> DataChannel event (→ OpenAI server)
+  </div>
+  <div class="legend-item" style="gap:8px">
+    <div style="width:32px;border-top:2px dashed #f0a040"></div> AI audio stream
+  </div>
+  <div class="legend-item">
+    <div class="legend-line state"></div> Game state transition
+  </div>
+  <div class="legend-item">
+    <div class="legend-line event"></div> Server → client event (DataChannel)
+  </div>
+  <div class="legend-item">
+    <span class="legend-dot" style="background:#f0c040"></span> AI internal action
+  </div>
+</div>
+
+<!-- Main diagram -->
+<div class="diagram">
+
+  <!-- Headers -->
+  <div class="lane-header time">T (s)</div>
+  <div class="lane-header app">Browser / App.jsx<div class="sub">React · game state · refs</div></div>
+  <div class="lane-header rt">RealtimeSession<div class="sub">realtime.js · WebRTC wrapper</div></div>
+  <div class="lane-header api">OpenAI Realtime API<div class="sub">gpt-4o-mini-realtime-preview</div></div>
+  <div class="lane-header play">Players<div class="sub">mic input · speaker output</div></div>
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!-- PHASE 0 — WHEEL SPIN -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div class="phase-band phase0">
+    Phase 0 — Wheel Spin &amp; Session Open
+    <span class="mode-badge mode-dialog">VAD = server_vad</span>
+  </div>
+
+  <div class="row">
+    <div class="cell time">0.0</div>
+    <div class="cell cell-app">
+      <span class="msg msg-state">SPINNING state entered (Space pressed)</span>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~4.5s<br>before<br>stop</div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span class="msg msg-app"><code>Roulette.onTarget(sector)</code> fires</span>
+        <span class="msg msg-app"><code>handleRouletteTarget(target)</code></span>
+        <span class="msg msg-app"><code>introQRef.current = introQ</code> &nbsp;<span style="color:#555">← question text withheld from preCtx</span></span>
+        <span class="msg msg-app"><code>muteSessionMic(false)</code> &nbsp;mic track enabled</span>
+        <span class="msg msg-app"><code>new RealtimeSession({ timeout: 120s })</code></span>
+      </div>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <span class="msg msg-app"><code>session.open({ dialogMode:true, tools:[start_timer] })</code></span>
+    </div>
+    <div class="cell cell-rt">
+      <span class="msg msg-rtc arrow-right">SDP offer created</span>
+    </div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt">
+      <span class="msg msg-rtc arrow-right"><code>POST /v1/realtime?model=gpt-4o-mini-realtime-preview</code></span>
+    </div>
+    <div class="cell cell-api">
+      <span class="msg msg-rtc arrow-left">SDP answer</span>
+    </div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt">
+      <span class="msg msg-ok">DataChannel opens → <code>_configure()</code></span>
+    </div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-dc arrow-right"><code>session.update</code> { VAD=server_vad, tools:[start_timer], instructions }</span>
+        <span class="msg msg-dc arrow-right"><code>conversation.item.create</code> { role:user, text:"НАЧНИ РАУНД" }</span>
+        <span class="msg msg-dc arrow-right"><code>response.create</code></span>
+      </div>
+    </div>
+    <div class="cell cell-api">
+      <span class="msg msg-event arrow-left"><code>session.created</code> + <code>session.updated</code></span>
+    </div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-app">Wire <code>onTranscriptDelta</code> → transcript watcher</span>
+        <span class="msg msg-app">Wire <code>onResponseDone</code> → per-turn accumulator reset</span>
+        <span class="msg msg-app">Start <strong>50s fallback timer</strong> (<code>dialogTimerRef</code>)</span>
+      </div>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!-- PHASE 1 — DIALOG -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div class="phase-band phase1">
+    Phase 1 — Dialog: Sector Announce + Character Intro
+    <span class="mode-badge mode-dialog">VAD active · mic live · players can speak</span>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+1s</div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-audio">🔊 Streams audio: "Сектор 7! Вопрос прислал Уолтер Уайт…"</span>
+        <span class="msg msg-event arrow-left"><code>response.audio_transcript.delta</code> (text chunks)</span>
+      </div>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">← hears sector + character intro</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-app"><code>onTranscriptDelta</code>: accumulate text</span>
+        <span class="msg msg-app" style="color:#555">Check: "нимание" AND "вопрос" in same turn? → NO (not yet)</span>
+      </div>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <span class="msg msg-event arrow-left"><code>response.done</code> → <code>onResponseDone</code> → <code>transcriptAccum = ''</code> (reset)</span>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <span class="msg msg-event"><code>response.done</code> (AI turn 1 complete)</span>
+    </div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <!-- ШАГ 3 small talk -->
+  <div class="phase-band phase1b">
+    Phase 1b — Small Talk (ШАГ 3): AI asks player one question
+    <span class="mode-badge mode-dialog">VAD active</span>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+5s</div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <span class="msg msg-audio">🔊 "Саша, вы смотрели Breaking Bad?"</span>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">← hears question</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <span class="msg msg-app"><code>onTranscriptDelta</code>: accumulate; no trigger words pair → ignore</span>
+    </div>
+    <div class="cell cell-rt">
+      <span class="msg msg-event"><code>response.audio_transcript.delta</code> chunks arrive</span>
+    </div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+8s</div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt">
+      <span class="msg msg-event"><code>speech_started</code> + <code>speech_stopped</code></span>
+    </div>
+    <div class="cell cell-api">
+      <span class="msg msg-audio">🎙 VAD detects player voice → hears answer</span>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">→ "Да, конечно!"</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <span class="msg msg-event arrow-left"><code>response.done</code> → reset <code>transcriptAccum</code></span>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <span class="msg msg-audio">🔊 Short reply + proceeds to ШАГ 4</span>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">← hears AI reply</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!-- PHASE 2 — TRIGGER + MODE SWITCH -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div class="phase-band phase2">
+    Phase 2 — Trigger Detection + Dialog → Monologue Switch
+    <span class="mode-badge mode-dialog" style="text-decoration:line-through">VAD=server_vad</span>
+    <span style="color:#f0c040;margin:0 6px">→</span>
+    <span class="mode-badge mode-mono">VAD=null · mic muted</span>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+12s</div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <span class="msg msg-audio">🔊 AI says: "Внимание! Вопрос!"</span>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">← starts to hear phrase…</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-event arrow-left"><code>response.audio_transcript.delta</code>: "…нимание… вопрос…"</span>
+        <span class="msg msg-ok">⚡ <strong>TRIGGER</strong>: both words in same turn → <code>triggerPending = true</code></span>
+        <span class="msg msg-app"><code>onTranscriptDelta = null</code> (stop watching)</span>
+        <span style="color:#555;font-size:11px;padding-left:8px">⏱ ~300ms before players hear the phrase</span>
+      </div>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <span class="msg msg-event arrow-left"><code>response.done</code> → <code>onResponseDone</code>: triggerPending=true → call <code>triggerReadQuestion()</code></span>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <span class="msg msg-event"><code>response.done</code> (AI finishes "Внимание! Вопрос!")</span>
+    </div>
+    <div class="cell cell-play">
+      <span style="color:#555;font-size:11px">hears end of phrase</span>
+    </div>
+  </div>
+
+  <!-- triggerReadQuestion steps -->
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-app">① <code>clearTimeout(dialogTimerRef)</code> — cancel 50s fallback</span>
+        <span class="msg msg-app">② <code>session.onTranscriptDelta = null</code>, <code>onResponseDone = null</code></span>
+        <span class="msg msg-app">③ <code>muteSessionMic(true)</code> → mic track <code>enabled=false</code></span>
+        <span class="msg msg-app">④ <code>session.setDialogMode(false)</code></span>
+        <span class="msg msg-app">⑤ <code>session.clearAudioBuffer()</code></span>
+        <span class="msg msg-app">⑥ <code>session.cancelResponse()</code> (defensive)</span>
+        <span class="msg msg-app">⑦ <code>session.injectSystemMessage(questionText)</code></span>
+        <span class="msg msg-app">⑧ Wire <code>onAudioDone</code> → READING_DONE + close in 15s</span>
+      </div>
+    </div>
+    <div class="cell cell-rt">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-dc arrow-right"><code>session.update</code> { turn_detection: null }</span>
+        <span class="msg msg-dc arrow-right"><code>input_audio_buffer.clear</code></span>
+        <span class="msg msg-dc arrow-right"><code>response.cancel</code> <span style="color:#555">(→ error ignored)</span></span>
+        <span class="msg msg-dc arrow-right"><code>conversation.item.create</code> { role:user, text:"МОНОЛОГ…«question»…start_timer()" }</span>
+        <span class="msg msg-dc arrow-right"><code>response.create</code></span>
+      </div>
+    </div>
+    <div class="cell cell-api">
+      <span class="msg msg-event arrow-left"><code>session.updated</code> { turn_detection: null }</span>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio" style="color:#555;font-size:11px">mic goes silent</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!-- PHASE 3 — MONOLOGUE -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div class="phase-band phase3">
+    Phase 3 — Monologue: Question Reading
+    <span class="mode-badge mode-mono">VAD=null · mic muted · uninterruptible</span>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+13s</div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-audio">🔊 Reads question verbatim: "В каком году…?"</span>
+        <span class="msg msg-audio">🔊 Says: "Время! Минута обсуждения!"</span>
+      </div>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">← hears full question + timer phrase</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt">
+      <span class="msg msg-event"><code>response.audio_transcript.delta</code> (transcript of question)</span>
+    </div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app">
+      <span class="msg msg-warn" style="font-size:10px">(optional) AI calls <code>start_timer()</code> tool → ack only, no state change</span>
+    </div>
+    <div class="cell cell-rt">
+      <span class="msg msg-event"><code>response.function_call_arguments.done</code> → <code>onToolCall('start_timer')</code></span>
+    </div>
+    <div class="cell cell-api">
+      <span class="msg msg-event">calls <code>start_timer()</code></span>
+    </div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time"></div>
+    <div class="cell cell-app"></div>
+    <div class="cell cell-rt">
+      <span class="msg msg-dc arrow-right"><code>function_call_output</code> { "acknowledged" } + <code>response.create</code></span>
+    </div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+20s</div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-event arrow-left"><code>response.audio.done</code> → <code>onAudioDone</code> fires</span>
+        <span class="msg msg-state">→ <code>send(EVENTS.READING_DONE)</code></span>
+        <span class="msg msg-state">Game state: <strong>READING → DISCUSSING</strong></span>
+        <span class="msg msg-app"><code>setTimeout(closePreSession, 15_000)</code></span>
+      </div>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api">
+      <span class="msg msg-event"><code>response.audio.done</code> (streaming complete)</span>
+    </div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">← audio still playing from buffer…</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!-- PHASE 4 — DISCUSSING -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div class="phase-band phase4">
+    Phase 4 — Discussion (DISCUSSING state · 60s timer)
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+20s</div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-ok">QuestionCard: dots → <strong>question text visible</strong></span>
+        <span class="msg msg-ok">Timer: starts counting down from 60s</span>
+      </div>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play">
+      <span class="msg msg-audio">← audio finishes playing (buffered)</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+35s</div>
+    <div class="cell cell-app">
+      <span class="msg msg-app"><code>closePreSession()</code> — WebRTC closed, <code>&lt;audio&gt;</code> removed</span>
+    </div>
+    <div class="cell cell-rt">
+      <span class="msg msg-rtc">session.close() → DC + PC + audioEl disposed</span>
+    </div>
+    <div class="cell cell-api">
+      <span style="color:#333;font-size:11px">connection closed</span>
+    </div>
+    <div class="cell cell-play"></div>
+  </div>
+
+  <div class="row">
+    <div class="cell time">~+80s</div>
+    <div class="cell cell-app">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="msg msg-state">60s timer → <code>TIMER_DONE</code></span>
+        <span class="msg msg-state">Game state: <strong>DISCUSSING → LISTENING</strong></span>
+        <span class="msg msg-ok">→ Session 2 (answer session) opens</span>
+      </div>
+    </div>
+    <div class="cell cell-rt"></div>
+    <div class="cell cell-api"></div>
+    <div class="cell cell-play">
+      <span style="color:#555;font-size:11px">60s discussion ends</span>
+    </div>
+  </div>
+
+</div><!-- /diagram -->
+
+<!-- ── Safety / Override table ── -->
+<div class="overrides" style="margin-top:32px">
+  <div class="overrides-title">Safety &amp; Override Mechanisms — all call triggerReadQuestion()</div>
+  <table class="override-table">
+    <tr>
+      <th>Mechanism</th>
+      <th>Trigger Condition</th>
+      <th>Implementation</th>
+      <th>Notes</th>
+    </tr>
+    <tr>
+      <td><span class="trigger-badge t-auto">AUTO — Transcript</span></td>
+      <td>AI says "Внимание! Вопрос!" (both words in same response turn)</td>
+      <td><code>onTranscriptDelta</code> accumulates → match → <code>triggerPending=true</code> → wait <code>response.done</code></td>
+      <td>~300ms advance notice before players hear phrase. Per-turn buffer prevents false match from earlier turns.</td>
+    </tr>
+    <tr>
+      <td><span class="trigger-badge t-manual">MANUAL — Enter key</span></td>
+      <td>Host presses <kbd>Enter</kbd> during SPINNING or READING state</td>
+      <td><code>triggerReadQRef.current()</code> called directly from keydown handler</td>
+      <td>Immediate — no waiting for response.done. <code>cancelResponse()</code> called defensively.</td>
+    </tr>
+    <tr>
+      <td><span class="trigger-badge t-timer">FALLBACK — 50s timer</span></td>
+      <td>50 seconds elapsed since session opened, no transcript trigger fired</td>
+      <td><code>dialogTimerRef = setTimeout(triggerReadQRef.current, 50_000)</code></td>
+      <td>Catches cases where AI never says trigger phrase (e.g. different wording, API quirk).</td>
+    </tr>
+    <tr>
+      <td><span class="trigger-badge t-safety">SAFETY — 120s timeout</span></td>
+      <td>Session-level timeout (RealtimeSession <code>PRE_SESSION_TIMEOUT</code>)</td>
+      <td><code>_handleError('safety timeout')</code> → <code>onError</code> → <code>send(EVENTS.READING_DONE)</code></td>
+      <td>Last resort. If READING or SPINNING state, forces game forward. Session always closes cleanly.</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ── Data withheld note ── -->
+<div style="margin-top:20px;padding:12px 16px;background:#111;border:1px solid #222;border-radius:4px;font-size:11px;color:#666;line-height:1.6">
+  <strong style="color:#888">⚠ Question text is withheld during Phase 0–1.</strong>
+  The <code>preCtx</code> object sent in session instructions includes <em>character, round_type, sector_number</em> but NOT <code>question_text</code>.
+  The question is injected only at Phase 2 Step ⑦ via <code>injectSystemMessage()</code>, ensuring the AI cannot accidentally reveal it during small talk.
+  The <code>QuestionCard</code> also shows animated dots (not text) while game state is READING.
+</div>
+
+</body>
+</html>
