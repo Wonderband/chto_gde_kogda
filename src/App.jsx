@@ -174,6 +174,7 @@ function Game() {
         sector,
         gameStateBeforeSend: gameStateRef.current,
       });
+      closePreSession();
       setSelectedSector(sector);
       send(EVENTS.SPIN_DONE);
     },
@@ -226,7 +227,7 @@ function Game() {
           score,
           game_language: import.meta.env.VITE_GAME_LANGUAGE || "ru",
         });
-        console.log("[App][Spin first line requested]");
+        console.log("[App][Spin dialogue armed]");
       } catch (err) {
         console.error("[Spin session open failed]", err);
         closePreSession();
@@ -257,78 +258,83 @@ function Game() {
         (async () => {
           const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
           if (!apiKey || !systemPromptRef.current) {
-            if (!cancelled) send(EVENTS.READING_DONE);
             return;
           }
 
-          let session = preSessionRef.current;
+          const openFreshReadSession = async () => {
+            const readSession = new RealtimeSession();
+            readSession.onError = (err) =>
+              console.error("[Moderator session error]", err.message);
+
+            await readSession.open({
+              apiKey,
+              systemPrompt: systemPromptRef.current,
+              voice: "echo",
+              enableMic: false,
+            });
+
+            return readSession;
+          };
 
           try {
-            // If the wheel-chat session failed earlier, recreate it on demand.
-            if (!session) {
-              session = new RealtimeSession();
-              session.onError = (err) =>
-                console.error("[Moderator session error]", err.message);
-              session.onTriggerPhrase = () => {
-                session.setMonologueMode({ tools: [] }).catch((err) => {
-                  console.error("[Trigger phrase safety switch failed]", err);
+            closePreSession();
+
+            let attempt = 0;
+            let completed = false;
+            let lastErr = null;
+
+            while (!completed && attempt < 2 && !cancelled) {
+              attempt += 1;
+              let session = null;
+              try {
+                session = await openFreshReadSession();
+                if (cancelled) {
+                  session.close();
+                  return;
+                }
+
+                preSessionRef.current = session;
+                console.log("[App][Session1 start]", {
+                  sector: (selectedSector ?? 0) + 1,
+                  currentQuestionId: currentQuestion?.id,
+                  freshReadSession: true,
+                  attempt,
                 });
-              };
 
-              await session.open({
-                apiKey,
-                systemPrompt: systemPromptRef.current,
-                voice: "echo",
-                enableMic: true,
-              });
+                await runSessionOneFlow({
+                  session,
+                  systemPrompt: systemPromptRef.current,
+                  gameContext: buildCtx(),
+                  warmupTimeoutMs: 6000,
+                });
 
-              if (cancelled) {
-                session.close();
-                return;
+                completed = true;
+              } catch (e) {
+                lastErr = e;
+                console.error("[Session 1 flow failed]", { attempt, error: e });
+              } finally {
+                if (session) session.close();
+                if (preSessionRef.current === session) preSessionRef.current = null;
               }
-
-              preSessionRef.current = session;
             }
 
-            console.log("[App][Session1 start]", {
-              sector: (selectedSector ?? 0) + 1,
-              currentQuestionId: currentQuestion?.id,
-            });
-            await runSessionOneFlow({
-              session,
-              systemPrompt: systemPromptRef.current,
-              gameContext: buildCtx(),
-              warmupTimeoutMs: 9000,
-            });
+            if (!completed) {
+              throw lastErr || new Error("Session 1 read did not complete cleanly");
+            }
 
             console.log("[App][Session1 done]");
-            closePreSession();
             if (!cancelled) send(EVENTS.READING_DONE);
             return;
           } catch (e) {
-            console.error("[Session 1 flow failed]", e);
+            console.error("[Session 1 final failure]", e);
             closePreSession();
-
-            // Deterministic fallback: read the question with the existing text path
-            // instead of skipping straight into the timer.
-            try {
-              const { text, responseId } = await readQuestion(
-                buildCtx(),
-                lastResponseId
-              );
-              if (!cancelled && responseId)
-                send("SET_LAST_RESPONSE_ID", responseId);
-              if (!cancelled) await tts(text);
-            } catch (fallbackErr) {
-              console.error("[Session 1 fallback read failed]", fallbackErr);
-            }
-
-            if (!cancelled) send(EVENTS.READING_DONE);
+            // Intentionally do not advance to DISCUSSING on a failed read.
           }
         })();
 
         return () => {
           cancelled = true;
+          closePreSession();
         };
       }
 
