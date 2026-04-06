@@ -18,6 +18,7 @@ import {
   evaluateAnswer,
   buildListeningScript,
 } from "../services/openai";
+import { GAME_LANGUAGE, REALTIME_VOICE } from "../config.js";
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 
@@ -69,7 +70,7 @@ export function useGamePhaseEffects({
             id: currentQuestion.id,
             character: currentQuestion.character,
             question_text:
-              import.meta.env.VITE_GAME_LANGUAGE === "uk"
+              GAME_LANGUAGE === "uk"
                 ? currentQuestion.question_uk
                 : currentQuestion.question_ru,
             correct_answer: currentQuestion.answer,
@@ -82,7 +83,7 @@ export function useGamePhaseEffects({
         : null,
       sector_number: (selectedSector ?? 0) + 1,
       blitz_queue_remaining: blitzQueue?.length ?? 0,
-      game_language: import.meta.env.VITE_GAME_LANGUAGE || "ru",
+      game_language: GAME_LANGUAGE,
       ...extra,
     };
   }
@@ -114,7 +115,7 @@ export function useGamePhaseEffects({
         await session.open({
           apiKey,
           systemPrompt: systemPromptRef.current,
-          voice: "echo",
+          voice: REALTIME_VOICE,
           enableMic: true,
         });
 
@@ -129,7 +130,7 @@ export function useGamePhaseEffects({
         await startWheelDialogue(session, systemPromptRef.current, {
           round_number: roundNumber + 1,
           score,
-          game_language: import.meta.env.VITE_GAME_LANGUAGE || "ru",
+          game_language: GAME_LANGUAGE,
         });
         console.log("[App][Spin first line requested]");
       } catch (err) {
@@ -169,7 +170,7 @@ export function useGamePhaseEffects({
           await readSession.open({
             apiKey,
             systemPrompt: systemPromptRef.current,
-            voice: "echo",
+            voice: REALTIME_VOICE,
             enableMic: false,
           });
           return readSession;
@@ -276,7 +277,7 @@ export function useGamePhaseEffects({
             await session.open({
               apiKey,
               systemPrompt: systemPromptRef.current,
-              voice: "echo",
+              voice: REALTIME_VOICE,
               enableMic: false,
             });
             if (cancelled) {
@@ -291,8 +292,7 @@ export function useGamePhaseEffects({
               earlyAnswer: state.earlyAnswer,
             });
           } else {
-            const lang = import.meta.env.VITE_GAME_LANGUAGE || "ru";
-            await tts(buildListeningScript(state.earlyAnswer, lang));
+            await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
           }
 
           if (cancelled) return;
@@ -315,8 +315,7 @@ export function useGamePhaseEffects({
     // Mock mode
     (async () => {
       try {
-        const lang = import.meta.env.VITE_GAME_LANGUAGE || "ru";
-        await tts(buildListeningScript(state.earlyAnswer, lang));
+        await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
         setIsRecording(true);
         recorderRef.current = await startRecording();
       } catch (e) {
@@ -420,7 +419,7 @@ export function useGamePhaseEffects({
             await session.open({
               apiKey,
               systemPrompt: systemPromptRef.current,
-              voice: "echo",
+              voice: REALTIME_VOICE,
               enableMic: false,
             });
             if (cancelled) {

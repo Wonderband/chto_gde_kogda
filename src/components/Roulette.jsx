@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SPIN_DURATION_MS } from "../config.js";
 
 const SECTORS = 13;
 const SIZE = 620;
@@ -141,7 +142,7 @@ export default function Roulette({
   onStop,
   onTarget,
   selectedSector,
-  durationMs = 45000,
+  durationMs = SPIN_DURATION_MS,
 }) {
   const [arrowAngle, setArrowAngle] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);

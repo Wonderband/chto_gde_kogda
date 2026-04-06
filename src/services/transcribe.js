@@ -6,6 +6,7 @@
  */
 
 import { mockTranscribeAudio } from './mock'
+import { TRANSCRIBE_MODEL, GAME_LANGUAGE } from '../config.js'
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const API_URL  = 'https://api.openai.com/v1/audio/transcriptions'
@@ -21,12 +22,10 @@ export async function transcribeAudio(audioBlob) {
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY
   if (!apiKey) throw new Error('VITE_OPENAI_API_KEY not set in .env')
 
-  const lang = import.meta.env.VITE_GAME_LANGUAGE || 'ru'
-
   const formData = new FormData()
   formData.append('file', audioBlob, 'answer.webm')
-  formData.append('model', 'gpt-4o-mini-transcribe')
-  formData.append('language', lang)
+  formData.append('model', TRANSCRIBE_MODEL)
+  formData.append('language', GAME_LANGUAGE)
 
   const response = await fetch(API_URL, {
     method: 'POST',

@@ -17,11 +17,12 @@ const ROUND_LABELS = {
   black_box: 'Чорний ящик',
 }
 
+import { GAME_LANGUAGE } from '../config.js'
+
 export default function QuestionCard({ question, evaluation, hideText = false }) {
   if (!question) return null
 
-  const lang = import.meta.env.VITE_GAME_LANGUAGE || 'ru'
-  const qText = lang === 'uk' ? question.question_uk : question.question_ru
+  const qText = GAME_LANGUAGE === 'uk' ? question.question_uk : question.question_ru
   const meta = CHARACTER_META[question.character] || { city: 'Невідоме місто', img: null, desc: '' }
   const roundLabel = ROUND_LABELS[question.round_type] || question.round_type
 

@@ -1,8 +1,7 @@
 import { createContext, useContext, useReducer, useCallback } from "react";
 import { STATES, EVENTS } from "./gameStateMachine";
 import { loadQuestions } from "./questions";
-
-const WINNING_SCORE = 6;
+import { WINNING_SCORE } from "../config.js";
 
 const initialState = {
   gameState: STATES.IDLE,

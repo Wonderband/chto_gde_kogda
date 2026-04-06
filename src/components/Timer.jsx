@@ -1,3 +1,5 @@
+import { TIMER_WARNING_SEC, TIMER_DANGER_SEC } from "../config.js"
+
 const SIZE = 220
 const STROKE_BG = 10
 const STROKE_FG = 12
@@ -9,8 +11,8 @@ const CIRC = 2 * Math.PI * R
 export default function Timer({ seconds, maxSeconds = 60, paused }) {
   const pct = Math.max(0, Math.min(1, seconds / maxSeconds))
   const dashOffset = CIRC * (1 - pct)
-  const isWarning = seconds <= 10 && seconds > 0
-  const isDanger = seconds <= 5 && seconds > 0
+  const isWarning = seconds <= TIMER_WARNING_SEC && seconds > 0
+  const isDanger  = seconds <= TIMER_DANGER_SEC  && seconds > 0
   const isEmpty = seconds <= 0
 
   const arcColor = isEmpty
