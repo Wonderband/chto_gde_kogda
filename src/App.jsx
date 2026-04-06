@@ -16,8 +16,12 @@ import {
   RealtimeSession,
   startWheelDialogue,
   runSessionOneFlow,
-  runPostAnswerFlow,
 } from "./services/realtime";
+import {
+  playListeningCue,
+  evaluateSessionTwo,
+  playVerdictCue,
+} from "./services/realtime.session2";
 import { speak } from "./services/tts";
 import { startRecording, stopRecording } from "./services/recorder";
 import { transcribeAudio } from "./services/transcribe";
@@ -227,7 +231,7 @@ function Game() {
           score,
           game_language: import.meta.env.VITE_GAME_LANGUAGE || "ru",
         });
-        console.log("[App][Spin dialogue armed]");
+        console.log("[App][Spin first line requested]");
       } catch (err) {
         console.error("[Spin session open failed]", err);
         closePreSession();
@@ -242,7 +246,7 @@ function Game() {
   // ─── State side-effects ───────────────────────────────────────────
 
   // READING:
-  //   real mode — run an explicit stage sequence inside Session 1
+  //   real mode — run a fresh protected Session 1 read path
   //   mock mode — existing TTS fallback
   useEffect(() => {
     if (gameState === STATES.READING && currentQuestion) {
@@ -361,26 +365,63 @@ function Game() {
     }
   }, [gameState, currentQuestion]);
 
-  // LISTENING: real mode — open post-answer Realtime session after STT
+  // LISTENING: real mode — short protected cue, then record
   // mock mode — existing TTS + recorder flow
   useEffect(() => {
     if (gameState === STATES.LISTENING) {
       if (!USE_MOCK) {
-        // In real mode we still need to capture the team's spoken answer via STT,
-        // then feed it to the post-answer Realtime session.
-        // Announce stop/early-answer via TTS first, then record.
+        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+        let cancelled = false;
+
         (async () => {
           try {
-            const lang = import.meta.env.VITE_GAME_LANGUAGE || "ru";
-            const script = buildListeningScript(state.earlyAnswer, lang);
-            await tts(script);
+            if (apiKey && systemPromptRef.current) {
+              closePostSession();
+              const session = new RealtimeSession();
+              session.onError = (err) =>
+                console.error("[Session2 cue error]", err.message);
+
+              await session.open({
+                apiKey,
+                systemPrompt: systemPromptRef.current,
+                voice: "echo",
+                enableMic: false,
+              });
+
+              if (cancelled) {
+                session.close();
+                return;
+              }
+
+              postSessionRef.current = session;
+
+              await playListeningCue({
+                session,
+                systemPrompt: systemPromptRef.current,
+                gameContext: buildCtx(),
+                earlyAnswer: state.earlyAnswer,
+              });
+            } else {
+              const lang = import.meta.env.VITE_GAME_LANGUAGE || "ru";
+              const script = buildListeningScript(state.earlyAnswer, lang);
+              await tts(script);
+            }
+
+            if (cancelled) return;
             setIsRecording(true);
             recorderRef.current = await startRecording();
           } catch (e) {
             console.error(e);
-            send(EVENTS.RECORDING_DONE, "");
+            if (!cancelled) send(EVENTS.RECORDING_DONE, "");
+          } finally {
+            closePostSession();
           }
         })();
+
+        return () => {
+          cancelled = true;
+          closePostSession();
+        };
       } else {
         // Mock mode
         (async () => {
@@ -402,78 +443,48 @@ function Game() {
   }, [gameState]);
 
   // EVALUATING:
-  //   real mode — open post-answer Realtime session; it handles evaluation + scoring
+  //   real mode — clean text-only evaluator, no inherited narrative thread
   //   mock mode — call evaluateAnswer() API (mock)
   useEffect(() => {
     if (gameState === STATES.EVALUATING) {
       if (!USE_MOCK) {
-        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-        if (!apiKey || !systemPromptRef.current) {
-          send(EVENTS.EVALUATION_DONE, {
-            correct: false,
-            score_delta: 1,
-            who_scores: "viewers",
-            moderator_phrase: "",
-            correct_answer_reveal: currentQuestion?.answer || "?",
-          });
-          return;
-        }
-
-        const postCtx = {
-          ...buildCtx({ team_answer_transcript: state.transcript }),
-          early_answer: state.earlyAnswer,
-        };
-
         let cancelled = false;
 
         (async () => {
           try {
-            closePostSession();
-            const session = new RealtimeSession();
-            session.onError = (err) =>
-              console.error("[Post-session error]", err.message);
-
-            await session.open({
-              apiKey,
-              systemPrompt: systemPromptRef.current,
-              voice: "echo",
-              enableMic: false,
-            });
-
-            if (cancelled) {
-              session.close();
-              return;
-            }
-
-            postSessionRef.current = session;
-
-            const result = await runPostAnswerFlow({
-              session,
-              systemPrompt: systemPromptRef.current,
-              gameContext: postCtx,
+            const { evaluation: result, responseId } = await evaluateSessionTwo({
+              buildCtx,
+              state,
+              currentQuestion,
+              evaluateAnswerFn: evaluateAnswer,
             });
 
             if (cancelled) return;
+            if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
 
-            closePostSession();
             const correct = result.correct ?? false;
             send(EVENTS.EVALUATION_DONE, {
+              ...result,
               correct,
-              score_delta: 1,
-              who_scores: correct ? "experts" : "viewers",
-              moderator_phrase: "",
+              score_delta: result.score_delta ?? 1,
+              who_scores:
+                result.who_scores ?? (correct ? "experts" : "viewers"),
+              moderator_phrase:
+                result.moderator_phrase ||
+                (correct
+                  ? "Ответ принят. Знатоки получают очко."
+                  : "Ответ не принят. Очко получает телезритель."),
               correct_answer_reveal:
                 result.correct_answer_reveal ?? currentQuestion?.answer ?? "?",
             });
           } catch (err) {
-            console.error("[Post-session flow failed]", err);
-            closePostSession();
+            console.error("[Evaluation failed]", err);
             if (!cancelled) {
               send(EVENTS.EVALUATION_DONE, {
                 correct: false,
                 score_delta: 1,
                 who_scores: "viewers",
-                moderator_phrase: "",
+                moderator_phrase: "Ответ не принят. Очко получает телезритель.",
                 correct_answer_reveal: currentQuestion?.answer || "?",
               });
             }
@@ -482,7 +493,6 @@ function Game() {
 
         return () => {
           cancelled = true;
-          closePostSession();
         };
       }
 
@@ -510,14 +520,57 @@ function Game() {
   }, [gameState]);
 
   // SCORING:
-  //   real mode — Realtime already spoke verdict; skip TTS, just advance
+  //   real mode — short protected Realtime verdict cue, then advance
   //   mock mode — play moderator_phrase via TTS then advance
   useEffect(() => {
     if (gameState === STATES.SCORING && evaluation) {
       if (!USE_MOCK) {
-        // Realtime session handled speech; advance immediately
-        send(EVENTS.SCORING_DONE);
-        return;
+        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+        let cancelled = false;
+
+        (async () => {
+          try {
+            if (apiKey && systemPromptRef.current) {
+              closePostSession();
+              const session = new RealtimeSession();
+              session.onError = (err) =>
+                console.error("[Session2 verdict error]", err.message);
+
+              await session.open({
+                apiKey,
+                systemPrompt: systemPromptRef.current,
+                voice: "echo",
+                enableMic: false,
+              });
+
+              if (cancelled) {
+                session.close();
+                return;
+              }
+
+              postSessionRef.current = session;
+
+              await playVerdictCue({
+                session,
+                systemPrompt: systemPromptRef.current,
+                gameContext: buildCtx(),
+                evaluation,
+              });
+            } else if (evaluation.moderator_phrase) {
+              await tts(evaluation.moderator_phrase);
+            }
+          } catch (e) {
+            console.error(e);
+          } finally {
+            closePostSession();
+            if (!cancelled) send(EVENTS.SCORING_DONE);
+          }
+        })();
+
+        return () => {
+          cancelled = true;
+          closePostSession();
+        };
       }
 
       // Mock mode
