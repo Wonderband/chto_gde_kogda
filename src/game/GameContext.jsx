@@ -121,6 +121,7 @@ function reducer(state, action) {
       const { who_scores } = state.evaluation;
 
       // Blitz continuation: more sub-questions remain AND last answer was correct
+      // EXPLAINING is skipped for blitz — go straight to next question
       if (state.blitzQueue.length > 0 && who_scores === "experts") {
         const [nextQ, ...blitzRemaining] = state.blitzQueue;
         return {
@@ -135,7 +136,17 @@ function reducer(state, action) {
         };
       }
 
-      // Final scoring (blitz complete/failed, or standard question)
+      // Non-blitz: go to EXPLAINING — score NOT applied yet (deferred to EXPLAINING_DONE)
+      return {
+        ...state,
+        blitzQueue: [],
+        gameState: STATES.EXPLAINING,
+      };
+    }
+
+    case EVENTS.EXPLAINING_DONE: {
+      // Score is applied here, after the moderator has finished narrating
+      const { who_scores } = state.evaluation;
       const newScore = {
         experts: state.score.experts + (who_scores === "experts" ? 1 : 0),
         viewers: state.score.viewers + (who_scores === "viewers" ? 1 : 0),
@@ -146,7 +157,6 @@ function reducer(state, action) {
       return {
         ...state,
         score: newScore,
-        blitzQueue: [],
         gameState: isOver ? STATES.GAME_OVER : STATES.READY,
         winner: expertWon ? "experts" : viewerWon ? "viewers" : null,
       };

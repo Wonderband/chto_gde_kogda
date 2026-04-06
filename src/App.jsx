@@ -23,6 +23,7 @@ const STATE_LABELS = {
   [STATES.LISTENING]: "Мікрофон увімкнено — відповідайте!",
   [STATES.EVALUATING]: "Оцінюємо відповідь...",
   [STATES.SCORING]: null,
+  [STATES.EXPLAINING]: "Ведучий пояснює відповідь...",
   [STATES.READY]: null,
   [STATES.GAME_OVER]: null,
 };
@@ -88,8 +89,8 @@ function Game() {
   // ── Derived layout flags ──────────────────────────────────────────────────
   const showRoulette =
     gameState === STATES.IDLE ||
-    gameState === STATES.SPINNING ||
-    gameState === STATES.READY;
+    gameState === STATES.SPINNING;
+  // READY intentionally excluded — question card with answer result fills the area
 
   const showQuestion = [
     STATES.READING,
@@ -97,6 +98,8 @@ function Game() {
     STATES.LISTENING,
     STATES.EVALUATING,
     STATES.SCORING,
+    STATES.EXPLAINING,
+    STATES.READY,
   ].includes(gameState);
 
   const showTimer = gameState === STATES.DISCUSSING;
@@ -177,7 +180,7 @@ function Game() {
             <div className="question-layout">
               <QuestionCard
                 question={currentQuestion}
-                evaluation={gameState === STATES.SCORING ? evaluation : null}
+                evaluation={gameState === STATES.READY ? evaluation : null}
                 hideText={gameState === STATES.READING}
               />
               {showTimer && (

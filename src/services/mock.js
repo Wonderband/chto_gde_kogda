@@ -75,12 +75,17 @@ export async function mockEvaluateAnswer(context) {
       : WRONG_PHRASES[idx](correctAnswer, score)
   }
 
+  const explanation = correct
+    ? `Знатоки відповіли правильно. Правильна відповідь: ${correctAnswer}.`
+    : `На жаль, знатоки помилилися. Правильна відповідь: ${correctAnswer}.`
+
   return {
     correct,
     score_delta: 1,
     who_scores: correct ? 'experts' : 'viewers',
     moderator_phrase: phrase,
     correct_answer_reveal: correctAnswer,
+    explanation,
   }
 }
 

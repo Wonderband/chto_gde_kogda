@@ -32,6 +32,9 @@ export default function Controls({ gameState, paused }) {
       {gameState === STATES.SCORING && (
         <Hint items={[['—', 'Зараховуємо...']]} dim />
       )}
+      {gameState === STATES.EXPLAINING && (
+        <Hint items={[['—', 'Ведучий пояснює...']]} dim />
+      )}
       {gameState === STATES.GAME_OVER && (
         <Hint items={[['R', 'Нова гра']]} />
       )}

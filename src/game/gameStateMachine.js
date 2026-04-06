@@ -6,7 +6,8 @@ export const STATES = {
   LISTENING: 'LISTENING',
   EVALUATING: 'EVALUATING',
   SCORING: 'SCORING',
-  READY: 'READY',       // ← between rounds: waiting for Space to spin again
+  EXPLAINING: 'EXPLAINING', // ← moderator narrates reasoning + reveals answer + announces score
+  READY: 'READY',           // ← between rounds: waiting for Space to spin again
   GAME_OVER: 'GAME_OVER',
 }
 
@@ -19,6 +20,7 @@ export const EVENTS = {
   RECORDING_DONE: 'RECORDING_DONE',
   EVALUATION_DONE: 'EVALUATION_DONE',
   SCORING_DONE: 'SCORING_DONE',
+  EXPLAINING_DONE: 'EXPLAINING_DONE', // ← score applied here, scoreboard flips after this
   NEXT_ROUND: 'NEXT_ROUND',  // ← Space after scoring
   GAME_OVER: 'GAME_OVER',
   RESTART: 'RESTART',
@@ -46,8 +48,10 @@ const transitions = {
     [EVENTS.EVALUATION_DONE]: STATES.SCORING,
   },
   [STATES.SCORING]: {
-    [EVENTS.SCORING_DONE]: STATES.READY,   // ← goes to READY, not SPINNING
-    [EVENTS.GAME_OVER]: STATES.GAME_OVER,
+    [EVENTS.SCORING_DONE]: STATES.EXPLAINING, // ← neutral segue cue, then EXPLAINING
+  },
+  [STATES.EXPLAINING]: {
+    [EVENTS.EXPLAINING_DONE]: STATES.READY,   // ← score applied here
   },
   [STATES.READY]: {
     [EVENTS.NEXT_ROUND]: STATES.SPINNING,  // ← Space triggers this

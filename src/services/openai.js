@@ -175,6 +175,11 @@ function buildEvaluationInstructions() {
     'Set who_scores to "experts" for a correct answer, otherwise "viewers".',
     'moderator_phrase must be short and suitable for the final spoken verdict.',
     'correct_answer_reveal must contain the canonical correct answer text.',
+    'For the "explanation" field: write 3–5 sentences in the SAME language as the question ' +
+      '(if Language is "ru" → write in Russian; if Language is "uk" → write in Ukrainian; NEVER write in English). ' +
+      'Write as a TV show moderator speaking aloud: recap the team answer → give brief reasoning or context → ' +
+      'reveal the correct answer → state the verdict → announce the new score (+1 point for who_scores). ' +
+      'Spoken natural style. No markdown. Maximum 60 words. No English.',
   ].join('\n')
 }
 
@@ -188,6 +193,9 @@ function buildEvaluationInput(gameContext) {
     q.answer_variants?.length ? `Accepted variants: ${q.answer_variants.join(', ')}` : '',
     q.hint_for_evaluator ? `Evaluator hint: ${q.hint_for_evaluator}` : '',
     `Team answer: ${gameContext.team_answer_transcript || ''}`,
+    gameContext.score
+      ? `Current score — experts: ${gameContext.score.experts}, viewers: ${gameContext.score.viewers}`
+      : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -205,6 +213,7 @@ function evaluationSchema() {
         'who_scores',
         'moderator_phrase',
         'correct_answer_reveal',
+        'explanation',
       ],
       properties: {
         correct: { type: 'boolean' },
@@ -212,6 +221,7 @@ function evaluationSchema() {
         who_scores: { type: 'string', enum: ['experts', 'viewers'] },
         moderator_phrase: { type: 'string' },
         correct_answer_reveal: { type: 'string' },
+        explanation: { type: 'string' },
       },
     },
   }

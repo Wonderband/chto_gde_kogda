@@ -149,6 +149,84 @@ export async function playVerdictCue({
   );
 }
 
+export async function playNeutralSegueCue({ session, systemPrompt, gameContext }) {
+  const ru = isRu(gameContext);
+  const line = ru
+    ? "А теперь — к правильному ответу."
+    : "А тепер — до правильної відповіді.";
+
+  await session.setMonologueMode({
+    tools: [],
+    instructions: buildModeratorBaseInstructions(systemPrompt),
+  });
+
+  const created = await session.createResponse({
+    instructions: `${buildModeratorBaseInstructions("")}
+
+ТЕКУЩАЯ ФАЗА: КРАТКИЙ ПЕРЕХОД К ОБЪЯСНЕНИЮ.
+
+Скажи РОВНО ЭТУ фразу и сразу замолчи:
+«${line}»
+
+ЖЁСТКИЕ ЗАПРЕТЫ:
+- не называй ответ, не объявляй вердикт,
+- не добавляй ни слова.`,
+    tools: [],
+    outputModalities: ["audio"],
+    metadata: { stage: "segue_cue" },
+    maxOutputTokens: 200,
+  });
+
+  console.log("[Realtime][Session2] segue cue created", {
+    responseId: created.responseId,
+  });
+
+  await waitForCompletedSpokenTurn(session, created.responseId, "segue cue", 20000);
+}
+
+export async function playExplanationCue({
+  session,
+  systemPrompt,
+  evaluation,
+  gameContext,
+}) {
+  const ru = isRu(gameContext);
+  const fallback = ru
+    ? `Правильный ответ: ${evaluation.correct_answer_reveal}.`
+    : `Правильна відповідь: ${evaluation.correct_answer_reveal}.`;
+  const text = (evaluation.explanation || fallback).trim();
+
+  // No setMonologueMode call — session is already in monologue mode from segue cue
+  const created = await session.createResponse({
+    instructions: `${buildModeratorBaseInstructions(systemPrompt)}
+
+ТЕКУЩАЯ ФАЗА: ЗАЧИТАЙ ОБЪЯСНЕНИЕ ДОСЛОВНО И ЗАМОЛЧИ.
+
+Прочитай РОВНО ЭТО:
+«${text}»
+
+ЖЁСТКИЕ ЗАПРЕТЫ:
+- не добавляй ничего от себя,
+- не меняй ни слова,
+- не начинай следующий раунд.`,
+    tools: [],
+    outputModalities: ["audio"],
+    metadata: { stage: "explanation_cue" },
+    maxOutputTokens: 1000,
+  });
+
+  console.log("[Realtime][Session2] explanation cue created", {
+    responseId: created.responseId,
+  });
+
+  await waitForCompletedSpokenTurn(
+    session,
+    created.responseId,
+    "explanation cue",
+    60000
+  );
+}
+
 export async function evaluateSessionTwo({
   buildCtx,
   state,
@@ -177,6 +255,11 @@ export async function evaluateSessionTwo({
           : "Ответ не принят. Очко получает телезритель."),
       correct_answer_reveal:
         evaluation?.correct_answer_reveal ?? currentQuestion?.answer ?? "?",
+      explanation:
+        evaluation?.explanation ||
+        (correct
+          ? `Знатоки ответили правильно. Правильный ответ: ${evaluation?.correct_answer_reveal ?? "?"}.`
+          : `К сожалению, знатоки ошиблись. Правильный ответ: ${evaluation?.correct_answer_reveal ?? "?"}.`),
     },
   };
 }

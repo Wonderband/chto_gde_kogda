@@ -8,7 +8,8 @@ import {
 import {
   playListeningCue,
   evaluateSessionTwo,
-  playVerdictCue,
+  playNeutralSegueCue,
+  playExplanationCue,
 } from "../services/realtime.session2";
 import { speak } from "../services/tts";
 import { startRecording } from "../services/recorder";
@@ -400,7 +401,7 @@ export function useGamePhaseEffects({
     })();
   }, [gameState]);
 
-  // ── SCORING: short protected verdict cue, then advance ───────────────────
+  // ── SCORING: neutral segue cue only — session stays open for EXPLAINING ──
 
   useEffect(() => {
     if (gameState !== STATES.SCORING || !evaluation) return;
@@ -415,7 +416,7 @@ export function useGamePhaseEffects({
             closePostSession();
             const session = new RealtimeSession();
             session.onError = (err) =>
-              console.error("[Session2 verdict error]", err.message);
+              console.error("[Session2 segue error]", err.message);
             await session.open({
               apiKey,
               systemPrompt: systemPromptRef.current,
@@ -426,21 +427,58 @@ export function useGamePhaseEffects({
               session.close();
               return;
             }
+            // Keep session open — EXPLAINING will reuse it
             postSessionRef.current = session;
-            await playVerdictCue({
+            await playNeutralSegueCue({
               session,
               systemPrompt: systemPromptRef.current,
               gameContext: buildCtx(),
-              evaluation,
             });
-          } else if (evaluation.moderator_phrase) {
-            await tts(evaluation.moderator_phrase);
           }
+          // No TTS fallback needed — segue is optional; EXPLAINING will speak the key content
         } catch (e) {
-          console.error(e);
+          console.error("[SCORING segue failed]", e);
+        } finally {
+          // Do NOT closePostSession() here — session must stay open for EXPLAINING
+          if (!cancelled) send(EVENTS.SCORING_DONE);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Mock mode: skip segue cue, just advance immediately
+    send(EVENTS.SCORING_DONE);
+  }, [gameState, evaluation]);
+
+  // ── EXPLAINING: full narrative — reasoning + answer + verdict + score ─────
+
+  useEffect(() => {
+    if (gameState !== STATES.EXPLAINING || !evaluation) return;
+
+    if (!USE_MOCK) {
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+      let cancelled = false;
+
+      (async () => {
+        try {
+          const session = postSessionRef.current;
+          if (session && apiKey) {
+            await playExplanationCue({
+              session,
+              systemPrompt: systemPromptRef.current || "",
+              evaluation,
+              gameContext: buildCtx(),
+            });
+          }
+          // If no session (e.g. API key missing), silently skip audio and advance
+        } catch (e) {
+          console.error("[EXPLAINING effect]", e);
         } finally {
           closePostSession();
-          if (!cancelled) send(EVENTS.SCORING_DONE);
+          if (!cancelled) send(EVENTS.EXPLAINING_DONE);
         }
       })();
 
@@ -450,14 +488,14 @@ export function useGamePhaseEffects({
       };
     }
 
-    // Mock mode
+    // Mock mode: TTS is acceptable here (voice inconsistency only matters in real mode)
     (async () => {
       try {
-        await tts(evaluation.moderator_phrase);
+        await tts(evaluation.explanation || evaluation.correct_answer_reveal || "");
       } catch (e) {
-        console.error(e);
+        console.error("[EXPLAINING mock]", e);
       } finally {
-        send(EVENTS.SCORING_DONE);
+        send(EVENTS.EXPLAINING_DONE);
       }
     })();
   }, [gameState, evaluation]);
