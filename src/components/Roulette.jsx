@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SPIN_DURATION_MS } from "../config.js";
 
-const SECTORS = 13;
+const SECTORS = 12;
 const SIZE = 620;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
