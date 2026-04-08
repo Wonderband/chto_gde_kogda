@@ -9,77 +9,54 @@ function delay(ms) {
 
 const READ_QUESTION_INTROS = [
   (char, city) =>
-    `Внимание! Против знатоков играет ${char} из ${city}.\n\nВнимание... вопрос!`,
+    `Увага! Проти знавців грає ${char} із міста ${city}.\n\nУвага... питання!`,
   (char, city) =>
-    `Вопрос прислал ${char} из ${city}. Слушайте внимательно.\n\nВнимание, вопрос!`,
+    `Питання надіслав ${char} із міста ${city}. Слухайте уважно.\n\nУвага, питання!`,
   (char, city) =>
-    `Против знатоков играет ${char}.\n\nМинута обсуждения!`,
+    `Проти знавців грає ${char}.\n\nХвилина обговорення!`,
 ]
 
 export async function mockReadQuestion(context) {
   await delay(800)
   const { current_question, round_number } = context
-  const char = current_question?.character || 'Уолтер Уайт'
+  const char = current_question?.character || 'Волтер Вайт'
   const city = 'Альбукерке, Нью-Мексико'
   const intro = READ_QUESTION_INTROS[round_number % READ_QUESTION_INTROS.length](char, city)
-  const questionText = current_question?.question_text || 'Вопрос не загружен.'
+  const questionText = current_question?.question_text || 'Питання не завантажено.'
   return `${intro}\n\n${questionText}`
 }
 
 const CORRECT_PHRASES = [
   (answer, score) =>
-    `Абсолютно верно! Правильный ответ — ${answer}. Знатоки зарабатывают очко. Счёт становится ${score.experts + 1}:${score.viewers} в пользу знатоков.`,
+    `Абсолютно правильно! Правильна відповідь — ${answer}. Знавці заробляють очко. Рахунок стає ${score.experts + 1}:${score.viewers} на користь знавців.`,
   (answer, score) =>
-    `Правильный ответ — ${answer}. Что наша жизнь? Игра! Счёт ${score.experts + 1}:${score.viewers}.`,
+    `Правильна відповідь — ${answer}. Що наше життя? Гра! Рахунок ${score.experts + 1}:${score.viewers}.`,
   (answer, score) =>
-    `Верно! ${answer}. Знатоки зарабатывают очко. Продолжаем. Счёт ${score.experts + 1}:${score.viewers}.`,
+    `Правильно! ${answer}. Знавці заробляють очко. Продовжуємо. Рахунок ${score.experts + 1}:${score.viewers}.`,
 ]
 
 const WRONG_PHRASES = [
   (answer, score) =>
-    `К сожалению, это неверный ответ. Правильный ответ был — ${answer}. Очко получают телезрители. Счёт ${score.experts}:${score.viewers + 1}.`,
+    `На жаль, це неправильна відповідь. Правильна відповідь — ${answer}. Очко отримують телеглядачі. Рахунок ${score.experts}:${score.viewers + 1}.`,
   (answer, score) =>
-    `Нет. Правильный ответ — ${answer}. Телезрители зарабатывают очко. Счёт ${score.experts}:${score.viewers + 1}.`,
+    `Ні. Правильна відповідь — ${answer}. Телеглядачі заробляють очко. Рахунок ${score.experts}:${score.viewers + 1}.`,
 ]
 
 export async function mockEvaluateAnswer(context) {
   await delay(1200)
-  const { current_question, team_answer_transcript, score, round_number } = context
+  const { current_question, team_answer_transcript } = context
   const correctAnswer = current_question?.correct_answer || '?'
   const variants = current_question?.answer_variants || [correctAnswer]
 
-  // Simple matching: check if transcript contains any variant (case-insensitive)
+  // Simple substring matching against correct answer and accepted variants (case-insensitive)
   const transcript = (team_answer_transcript || '').toLowerCase()
   const correct =
     variants.some((v) => transcript.includes(v.toLowerCase())) ||
     transcript.includes(correctAnswer.toLowerCase())
 
-  const isBlitz = current_question?.round_type === 'blitz'
-  const blitzRemaining = context.blitz_queue_remaining ?? 0
-
-  let phrase
-  if (isBlitz) {
-    if (!correct) {
-      phrase = `К сожалению, неверно. Правильный ответ — ${correctAnswer}. Блиц окончен. Очко получают телезрители. Счёт ${score.experts}:${score.viewers + 1}.`
-    } else if (blitzRemaining > 0) {
-      // Intermediate blitz question — correct but not yet scored
-      phrase = `Верно! Правильный ответ — ${correctAnswer}. Продолжаем блиц!`
-    } else {
-      // Final blitz question — all correct, experts score
-      phrase = `Блестяще! Все три вопроса отвечены верно! Правильный ответ — ${correctAnswer}. Знатоки зарабатывают очко за блиц. Счёт ${score.experts + 1}:${score.viewers}.`
-    }
-  } else {
-    const idx = round_number % (correct ? CORRECT_PHRASES.length : WRONG_PHRASES.length)
-    phrase = correct
-      ? CORRECT_PHRASES[idx](correctAnswer, score)
-      : WRONG_PHRASES[idx](correctAnswer, score)
-  }
-
+  // Return only judgment — explanation is built by useGamePhaseEffects.buildSpeechText
   return {
     correct,
-    score_delta: 1,
-    who_scores: correct ? 'experts' : 'viewers',
-    moderator_phrase: phrase,
     correct_answer_reveal: correctAnswer,
   }
 }
@@ -88,22 +65,25 @@ export async function mockCommentary(context) {
   await delay(500)
   const { score } = context
   if (score.experts === score.viewers) {
-    return `Счёт равный — ${score.experts}:${score.viewers}. Напряжение нарастает. Продолжаем!`
+    return `Рахунок рівний — ${score.experts}:${score.viewers}. Напруження наростає. Продовжуємо!`
   }
-  return `Что наша жизнь? Игра!`
+  return `Що наше життя? Гра!`
 }
 
 // ── Whisper mock ──────────────────────────────────────────────────────────────
 
 // Returns a random plausible-looking transcript
+// Includes correct answers for blitz questions so mock mode can exercise the advance-blitz path
 const MOCK_TRANSCRIPTS = [
   'Хайзенберг',
-  'Метамфетамин',
-  'Чёрный ящик содержит синтетику',
-  'Я не знаю правильного ответа',
-  'Уолтер Уайт',
-  'Полос Эрмандос',
+  'Метамфетамін',
+  'Уїтмен',         // matches blitz Q1 (Walt Whitman)
+  'Флінн',          // matches blitz Q2 (Walter White Jr. / Flynn)
+  'Скайлер',        // matches blitz Q3 (Skyler White)
+  'Волтер Вайт',
+  'Поллос Ерманос',
   'Альбукерке',
+  'Я не знаю правильної відповіді',
 ]
 
 export async function mockTranscribeAudio(_blob) {
@@ -113,27 +93,33 @@ export async function mockTranscribeAudio(_blob) {
 
 // ── TTS mock ──────────────────────────────────────────────────────────────────
 
-// Preferred male voice names (Windows / macOS / Linux)
+// Preferred male voice names for Ukrainian / fallback Russian (Windows / macOS / Linux)
 const MALE_VOICE_NAMES = [
-  'microsoft pavel',   // Windows Russian male
+  'microsoft Oleksandr',  // Windows Ukrainian male
+  'microsoft andrii',
+  'oleksandr',
+  'dmytro',
+  'microsoft pavel',      // fallback Russian male
   'microsoft dmitry',
   'yuri',
   'pavel',
   'dmitry',
   'male',
-  'google русский',
 ]
 
 function pickMaleVoice(voices) {
-  // 1. Russian male by name
+  // 1. Ukrainian voice by name
   for (const hint of MALE_VOICE_NAMES) {
     const v = voices.find((v) => v.name.toLowerCase().includes(hint))
     if (v) return v
   }
-  // 2. Any Russian voice (better than nothing)
+  // 2. Any Ukrainian voice
+  const uk = voices.find((v) => v.lang.startsWith('uk'))
+  if (uk) return uk
+  // 3. Any Russian voice (better than nothing)
   const ru = voices.find((v) => v.lang.startsWith('ru'))
   if (ru) return ru
-  // 3. Any English male by name
+  // 4. Any English male by name
   const en = voices.find((v) => v.name.toLowerCase().includes('male'))
   if (en) return en
   return null
@@ -156,7 +142,7 @@ export async function mockSpeak(text, { onStart, onEnd } = {}) {
 
     return new Promise((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = 'ru-RU'
+      utterance.lang = 'uk-UA'
       utterance.rate = 0.82   // slow, authoritative
       utterance.pitch = 0.6   // deep male pitch
 

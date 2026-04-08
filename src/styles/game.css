@@ -1,0 +1,214 @@
+/* ── game.css — layout & game-state styles extracted from App.jsx ── */
+
+.game-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Status strip ── */
+.status-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 1.5rem;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.1);
+  min-height: 3rem;
+  flex-shrink: 0;
+}
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 180px;
+}
+.status-right {
+  justify-content: flex-end;
+}
+.rec-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--timer-warning);
+  letter-spacing: 0.05em;
+}
+.rec-dot {
+  font-size: 0.7rem;
+}
+.state-tag {
+  font-size: 0.85rem;
+  letter-spacing: 0.15em;
+  color: var(--accent-gold);
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+.pause-tag {
+  font-size: 1rem;
+  letter-spacing: 0.2em;
+  color: var(--timer-warning);
+  text-transform: uppercase;
+  animation: rec-blink 1.2s ease-in-out infinite;
+}
+.round-counter {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+/* ── IDLE ── */
+.roulette-overlay-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+.idle-title {
+  font-size: var(--font-display);
+  color: var(--accent-gold);
+  font-family: Georgia, serif;
+  letter-spacing: 0.25em;
+  font-weight: normal;
+}
+.idle-subtitle {
+  font-size: var(--font-label);
+  color: var(--text-secondary);
+  letter-spacing: 0.1em;
+}
+.idle-hint-key {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+  margin-top: 0.3rem;
+}
+.idle-hint-key kbd {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border-gold-strong);
+  border-radius: 4px;
+  background: rgba(201, 168, 76, 0.08);
+  color: var(--accent-gold);
+  font-family: monospace;
+  font-size: 0.9em;
+}
+.ready-label {
+  font-size: 0.95rem;
+  color: var(--accent-gold);
+  letter-spacing: 0.12em;
+  margin-bottom: 1rem;
+  opacity: 0.85;
+}
+.ready-label kbd {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border-gold-strong);
+  border-radius: 4px;
+  background: rgba(201, 168, 76, 0.1);
+  color: var(--accent-gold);
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+/* ── SPINNING ── */
+.spin-label {
+  font-size: var(--font-title);
+  color: var(--accent-gold);
+  font-family: Georgia, serif;
+  letter-spacing: 0.15em;
+}
+
+/* ── QUESTION screen ── */
+.screen-question {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 2rem;
+  overflow: hidden;
+}
+.question-layout {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  max-width: 1100px;
+  width: 100%;
+}
+.timer-column {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding-top: 1.5rem;
+}
+.listen-hint {
+  font-size: var(--font-label);
+  color: var(--timer-warning);
+  letter-spacing: 0.08em;
+  text-align: center;
+  animation: rec-blink 1s ease-in-out infinite;
+}
+
+/* ── GAME OVER screen ── */
+.screen-gameover {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  text-align: center;
+  padding: 2rem;
+}
+.gameover-title {
+  font-size: var(--font-display);
+  font-family: Georgia, serif;
+  letter-spacing: 0.15em;
+}
+.experts-color {
+  color: var(--score-experts);
+  text-shadow: 0 0 40px rgba(90, 184, 90, 0.5);
+}
+.viewers-color {
+  color: var(--score-viewers);
+  text-shadow: 0 0 40px rgba(184, 90, 90, 0.5);
+}
+.gameover-score {
+  font-size: clamp(4rem, 8vw, 8rem);
+  font-family: Georgia, serif;
+  font-weight: bold;
+  line-height: 1;
+}
+.go-e {
+  color: var(--score-experts);
+}
+.go-sep {
+  color: var(--accent-gold);
+}
+.go-v {
+  color: var(--score-viewers);
+}
+.gameover-motto {
+  font-size: var(--font-title);
+  color: var(--accent-gold);
+  font-style: italic;
+  opacity: 0.8;
+}
+.gameover-hint {
+  font-size: var(--font-label);
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+.gameover-hint kbd {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border-gold);
+  border-radius: 4px;
+  background: rgba(201, 168, 76, 0.08);
+  color: var(--accent-gold);
+  font-family: monospace;
+}

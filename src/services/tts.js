@@ -1,4 +1,5 @@
 import { mockSpeak, mockStopSpeaking, mockIsSpeaking } from './mock'
+import { TTS_MODEL, TTS_VOICE } from '../config.js'
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
@@ -20,7 +21,7 @@ export async function speak(text, { onStart, onEnd } = {}) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ model: 'tts-1', voice: 'onyx', input: text }),
+    body: JSON.stringify({ model: TTS_MODEL, voice: TTS_VOICE, input: text }),
   })
 
   if (!response.ok) {

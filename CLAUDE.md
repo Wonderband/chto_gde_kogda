@@ -176,7 +176,7 @@ Prevents AI from using wrong number from examples.
 ```
 VITE_OPENAI_API_KEY=sk-...        # Single key for all OpenAI services
 VITE_VECTOR_STORE_ID=vs_...       # From platform.openai.com/storage/vector-stores
-VITE_GAME_LANGUAGE=ru             # "ru" or "uk"
+VITE_GAME_LANGUAGE=uk             # "uk" (default) or "ru"
 VITE_USE_MOCK=false               # "true" to bypass all API calls (mock mode)
 ```
 
@@ -215,22 +215,23 @@ VITE_USE_MOCK=false               # "true" to bypass all API calls (mock mode)
 - Roulette SVG with 13 sectors, envelope animation, arrow spin physics
 - Game state machine (all states + blitz logic)
 - Scoreboard, Timer (60s/20s), QuestionCard (hideText during READING)
-- Blitz queue: 3 questions loaded at SPIN_DONE, intermediate scoring skipped
+- Blitz: 3 separate question objects (bb_q06_1/2/3), each with own hint/answer/variants
+- Blitz Q1: announces sector + character; Q2/Q3: skips intro, just "Другий/Третій питання."
+- Blitz scoring: `blitz_intermediate` flag — advances without score on correct; applies score on wrong or final
+- Blitz mock: MOCK_TRANSCRIPTS include Уїтмен/Флінн/Скайлер so correct-path can be tested
 - Realtime API pre-question session (WebRTC, SDP exchange, tool calling)
 - Realtime API post-answer session (evaluation ritual + end_round tool)
-- TTS for LISTENING announcement ("Стоп!" / "Досрочный ответ!")
+- Answer reveal order enforced in both text evaluator and realtime: repeat → hint reasoning → answer → verdict
+- TTS for LISTENING announcement ("Дострокова відповідь!" / "Час вийшов.")
 - STT via gpt-4o-mini-transcribe
 - Mock mode (VITE_USE_MOCK=true) fully functional for UI testing
-- Git initialized, pushed to GitHub
+- Ukrainian as primary language throughout (.env VITE_GAME_LANGUAGE=uk, all defaults)
+- 12 unique Breaking Bad characters; 4 new: Tuco, Gale, Jane, Flynn (placeholder photos)
+- All 14 hint_for_evaluator texts build suspense — answer appears only at end of hint
 
-### 🐛 Known Issues (bugs found in testing, fixes deployed — needs re-testing)
-1. **Sector number** — AI was announcing wrong sector. Fix: sector number embedded in ШАГ 1 heading
-2. **Phrases cut off** — audio cut before "Время!" finished. Fix: 800ms delay before closePreSession, 2500ms before closePostSession
-3. **Double "Стоп!" voice** — TTS + Realtime both said "Стоп!". Fix: removed ШАГ 1 from post-answer instructions
-4. **Wrong score display** — AI said 1:1 but screen showed 0:2. Fix: who_scores derived from args.correct
+### 🐛 Known Issues
+- Character images for Tuco, Gale, Jane, Flynn are placeholders — need real photos
 
-### 📋 Next Tasks (to discuss and plan)
-- Re-test all 4 fixes above after git commit
-- Revisit overall architecture — user wants to review and possibly simplify
-- Update TDD to match current implementation
-- Consider whether Realtime API approach is correct or needs redesign
+### 📋 Next Tasks
+- Provide real character photos for tuco.jpg, gale.jpg, jane.jpg, flynn.jpg
+- End-to-end test in real mode: verify hint-based reasoning narrative quality
