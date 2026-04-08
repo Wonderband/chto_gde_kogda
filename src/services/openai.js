@@ -43,27 +43,33 @@ function extractOutputText(data) {
 // ─── Local script builder for question reading ────────────────────────────────
 
 const CHARACTER_RU = {
-  'Walter White': { name: 'Уолтер Уайт', city: 'Альбукерке, Нью-Мексико', desc: 'учитель химии' },
-  'Jesse Pinkman': { name: 'Джесси Пинкман', city: 'Альбукерке, Нью-Мексико', desc: 'уличный химик' },
-  'Saul Goodman': { name: 'Сол Гудман', city: 'Альбукерке, Нью-Мексико', desc: 'адвокат' },
-  'Skyler White': { name: 'Скайлер Уайт', city: 'Альбукерке, Нью-Мексико', desc: 'бухгалтер' },
-  'Hank Schrader': { name: 'Хэнк Шрейдер', city: 'Альбукерке, Нью-Мексико', desc: 'агент DEA' },
-  'Mike Ehrmantraut': { name: 'Майк Эрмантраут', city: 'Филадельфия', desc: 'решатель проблем' },
-  'Gustavo Fring': { name: 'Густаво Фринг', city: 'Сантьяго, Чили', desc: 'владелец Pollos Hermanos' },
-  'Jane Margolis': { name: 'Джейн Марголис', city: 'Альбукерке, Нью-Мексико', desc: 'художница' },
-  'Todd Alquist': { name: 'Тодд Олквист', city: 'Альбукерке, Нью-Мексико', desc: 'химик-самоучка' },
+  'Walter White':     { name: 'Уолтер Уайт',        city: 'Альбукерке, Нью-Мексико', desc: 'учитель химии' },
+  'Jesse Pinkman':   { name: 'Джесси Пинкман',      city: 'Альбукерке, Нью-Мексико', desc: 'уличный химик' },
+  'Saul Goodman':    { name: 'Сол Гудман',           city: 'Альбукерке, Нью-Мексико', desc: 'адвокат' },
+  'Skyler White':    { name: 'Скайлер Уайт',         city: 'Альбукерке, Нью-Мексико', desc: 'бухгалтер' },
+  'Hank Schrader':   { name: 'Хэнк Шрейдер',        city: 'Альбукерке, Нью-Мексико', desc: 'агент DEA' },
+  'Mike Ehrmantraut':{ name: 'Майк Эрмантраут',      city: 'Филадельфия',             desc: 'решатель проблем' },
+  'Gustavo Fring':   { name: 'Густаво Фринг',        city: 'Сантьяго, Чили',          desc: 'владелец Pollos Hermanos' },
+  'Jane Margolis':   { name: 'Джейн Марголис',       city: 'Альбукерке, Нью-Мексико', desc: 'художница' },
+  'Todd Alquist':    { name: 'Тодд Олквист',         city: 'Альбукерке, Нью-Мексико', desc: 'химик-самоучка' },
+  'Tuco Salamanca':  { name: 'Туко Саламанка',       city: 'Альбукерке, Нью-Мексико', desc: 'дилер наркотиків' },
+  'Gale Boetticher': { name: 'Гейл Беттикер',        city: 'Альбукерке, Нью-Мексико', desc: 'химик-лаборант' },
+  'Walter White Jr.':{ name: 'Уолтер Уайт-младший', city: 'Альбукерке, Нью-Мексико', desc: 'сын Уолтера Уайта' },
 }
 
 const CHARACTER_UK = {
-  'Walter White': { name: 'Волтер Вайт', city: 'Альбукерке, Нью-Мексико', desc: 'вчитель хімії' },
-  'Jesse Pinkman': { name: 'Джессі Пінкман', city: 'Альбукерке, Нью-Мексико', desc: 'вуличний хімік' },
-  'Saul Goodman': { name: 'Сол Гудман', city: 'Альбукерке, Нью-Мексико', desc: 'адвокат' },
-  'Skyler White': { name: 'Скайлер Вайт', city: 'Альбукерке, Нью-Мексико', desc: 'бухгалтер' },
-  'Hank Schrader': { name: 'Генк Шрейдер', city: 'Альбукерке, Нью-Мексико', desc: 'агент DEA' },
-  'Mike Ehrmantraut': { name: 'Майк Ерментраут', city: 'Філадельфія', desc: 'вирішувач проблем' },
-  'Gustavo Fring': { name: 'Густаво Фрінг', city: 'Сантьяго, Чилі', desc: 'власник Pollos Hermanos' },
-  'Jane Margolis': { name: 'Джейн Марголіс', city: 'Альбукерке, Нью-Мексико', desc: 'художниця' },
-  'Todd Alquist': { name: 'Тодд Олквіст', city: 'Альбукерке, Нью-Мексико', desc: 'хімік-самоучка' },
+  'Walter White':     { name: 'Волтер Вайт',           city: 'Альбукерке, Нью-Мексико', desc: 'вчитель хімії' },
+  'Jesse Pinkman':   { name: 'Джессі Пінкман',         city: 'Альбукерке, Нью-Мексико', desc: 'вуличний хімік' },
+  'Saul Goodman':    { name: 'Сол Гудман',              city: 'Альбукерке, Нью-Мексико', desc: 'адвокат' },
+  'Skyler White':    { name: 'Скайлер Вайт',            city: 'Альбукерке, Нью-Мексико', desc: 'бухгалтер' },
+  'Hank Schrader':   { name: 'Генк Шрейдер',           city: 'Альбукерке, Нью-Мексико', desc: 'агент DEA' },
+  'Mike Ehrmantraut':{ name: 'Майк Ерментраут',         city: 'Філадельфія',             desc: 'вирішувач проблем' },
+  'Gustavo Fring':   { name: 'Густаво Фрінг',           city: 'Сантьяго, Чилі',          desc: 'власник Pollos Hermanos' },
+  'Jane Margolis':   { name: 'Джейн Марголіс',          city: 'Альбукерке, Нью-Мексико', desc: 'художниця' },
+  'Todd Alquist':    { name: 'Тодд Олквіст',            city: 'Альбукерке, Нью-Мексико', desc: 'хімік-самоучка' },
+  'Tuco Salamanca':  { name: 'Туко Саламанка',          city: 'Альбукерке, Нью-Мексико', desc: 'дилер наркотиків' },
+  'Gale Boetticher': { name: 'Ґейл Беттікер',           city: 'Альбукерке, Нью-Мексико', desc: 'хімік-лаборант' },
+  'Walter White Jr.':{ name: 'Волтер Вайт-молодший',   city: 'Альбукерке, Нью-Мексико', desc: 'син Волтера Вайта' },
 }
 
 const BLITZ_POS_RU = ['Первый', 'Второй', 'Третий']
@@ -88,12 +94,16 @@ function buildReadScript(gameContext) {
           ? `Сектор ${sector}. Сектор Блиц на столе! Три вопроса. Три телезрителя. Двадцать секунд на каждый.`
           : `Сектор ${sector}. Сектор Бліц на столі! Три питання. Три телеглядачі. Двадцять секунд на кожне.`
       )
+      // Only introduce the character for Q1
+      lines.push(
+        isRu
+          ? `${posLabel} вопрос. Против знатоков играет ${meta.name} из ${meta.city}.`
+          : `${posLabel} питання. Проти знавців грає ${meta.name} із міста ${meta.city}.`
+      )
+    } else {
+      // Q2/Q3: just announce the position, no sector/character re-intro
+      lines.push(isRu ? `${posLabel} вопрос.` : `${posLabel} питання.`)
     }
-    lines.push(
-      isRu
-        ? `${posLabel} вопрос. Против знатоков играет ${meta.name} из ${meta.city}.`
-        : `${posLabel} питання. Проти знавців грає ${meta.name} із міста ${meta.city}.`
-    )
     lines.push(q.question_text)
     lines.push(isRu ? 'Время! Двадцать секунд!' : 'Час! Двадцять секунд!')
     return lines.join('\n')
@@ -163,26 +173,28 @@ async function callOpenAI(gameContext, previousResponseId) {
 
 function buildEvaluationInstructions() {
   return [
-    'You are the final answer judge for the TV game "What? Where? When?".',
-    'Return ONLY structured JSON that matches the provided schema.',
-    'Decide whether the team answer is essentially correct.',
-    'Accept semantic matches, transliterations, and wording variants when they preserve the key fact.',
-    'Set who_scores to "experts" for a correct answer, otherwise "viewers".',
-    'moderator_phrase must be short and suitable for the final spoken verdict.',
-    'correct_answer_reveal must contain the canonical correct answer text.',
-    'For the "explanation" field: write 3–5 sentences in the SAME language as the question ' +
-      '(if Language is "ru" → write in Russian; if Language is "uk" → write in Ukrainian; NEVER write in English). ' +
-      'Write as a TV show moderator speaking aloud: recap the team answer → give brief reasoning or context → ' +
-      'reveal the correct answer → state the verdict → announce the new score (+1 point for who_scores). ' +
-      'Spoken natural style. No markdown. Maximum 60 words. No English.',
+    'Ти — суддя відповідей у грі «Що? Де? Коли?».',
+    'Порівняй відповідь команди (Team answer) з правильною відповіддю (Correct answer) та прийнятними варіантами (Accepted variants).',
+    '',
+    'ПРАВИЛА ПРИЙНЯТТЯ:',
+    '1. Відповідь правильна, якщо містить усі ключові факти з правильної відповіді або прийнятних варіантів — навіть у розгорнутому чи пояснювальному форматі.',
+    '2. Транслітерації між мовами ПРИЙНЯТНІ (Schwartz = Шварц; Fe = залізо = ferrum = iron — все це одне й те саме).',
+    '3. ВІДХИЛЯЙ, якщо відповідь є перекладом власного імені або специфічного терміна, що звучить ПОВНІСТЮ ІНАКШЕ, ніж правильна відповідь і відсутній у прийнятних варіантах. Приклад: «Black» — НЕ правильна відповідь, якщо правильна відповідь «Schwartz», навіть якщо «Schwartz» означає «чорний» по-німецьки. Ключова ознака: різне звучання + переклад замість оригінального слова.',
+    '',
+    'Поверни ТІЛЬКИ JSON без жодних пояснень поза JSON.',
+    'correct_answer_reveal — канонічний текст правильної відповіді (скопіюй з Correct answer або виправ до найпоширенішої форми).',
   ].join('\n')
 }
 
 function buildEvaluationInput(gameContext) {
   const q = gameContext.current_question || {}
+  const blitzRemaining = gameContext.blitz_queue_remaining ?? 0
   return [
-    `Language: ${gameContext.game_language || 'ru'}`,
+    `Language: ${gameContext.game_language || 'uk'}`,
     `Early answer: ${Boolean(gameContext.early_answer)}`,
+    q.round_type === 'blitz' ? `Blitz question: yes` : '',
+    q.round_type === 'blitz' ? `Blitz position: ${q.blitz_position || 1}` : '',
+    q.round_type === 'blitz' ? `Blitz remaining: ${blitzRemaining}` : '',
     `Question: ${q.question_text || ''}`,
     `Correct answer: ${q.correct_answer || ''}`,
     q.answer_variants?.length ? `Accepted variants: ${q.answer_variants.join(', ')}` : '',
@@ -202,31 +214,23 @@ function evaluationSchema() {
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: [
-        'correct',
-        'score_delta',
-        'who_scores',
-        'moderator_phrase',
-        'correct_answer_reveal',
-        'explanation',
-      ],
+      required: ['correct', 'correct_answer_reveal'],
       properties: {
         correct: { type: 'boolean' },
-        score_delta: { type: 'integer', minimum: 0, maximum: 1 },
-        who_scores: { type: 'string', enum: ['experts', 'viewers'] },
-        moderator_phrase: { type: 'string' },
         correct_answer_reveal: { type: 'string' },
-        explanation: { type: 'string' },
       },
     },
   }
 }
 
 async function callStructuredEvaluation(gameContext) {
+  const input = buildEvaluationInput(gameContext)
+  console.log('[Evaluator][INPUT]\n' + input)
+
   const body = {
     model: EVALUATOR_MODEL,
     instructions: buildEvaluationInstructions(),
-    input: buildEvaluationInput(gameContext),
+    input,
     text: {
       format: evaluationSchema(),
     },
@@ -241,6 +245,7 @@ async function callStructuredEvaluation(gameContext) {
 
   const parsed = data?.output_parsed
   if (parsed && typeof parsed === 'object') {
+    console.log('[Evaluator][OUTPUT]', parsed)
     return { evaluation: parsed, responseId: data.id }
   }
 
@@ -250,7 +255,9 @@ async function callStructuredEvaluation(gameContext) {
   }
 
   try {
-    return { evaluation: JSON.parse(text), responseId: data.id }
+    const result = JSON.parse(text)
+    console.log('[Evaluator][OUTPUT]', result)
+    return { evaluation: result, responseId: data.id }
   } catch (err) {
     throw new Error(`OpenAI returned invalid evaluation JSON: ${text}`)
   }

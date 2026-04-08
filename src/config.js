@@ -28,7 +28,7 @@ export const TIMER_DANGER_SEC  = 5
 
 // ─── Language ──────────────────────────────────────────────────────────────
 /** Game UI and moderator speech language: 'ru' | 'uk' */
-export const GAME_LANGUAGE = e.VITE_GAME_LANGUAGE || 'ru'
+export const GAME_LANGUAGE = e.VITE_GAME_LANGUAGE || 'uk'
 
 // ─── Players ───────────────────────────────────────────────────────────────
 /** Names of players sitting at the table (comma-separated in .env) */

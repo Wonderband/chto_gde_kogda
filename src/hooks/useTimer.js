@@ -9,20 +9,22 @@ export function useTimer(gameState, send, timerDuration) {
   const [timerSec, setTimerSec] = useState(60);
   const [paused, setPaused] = useState(false);
   const timerRef = useRef(null);
+  // Tracks remaining seconds without going through React state to avoid
+  // calling send() inside a setState updater (which runs during render).
+  const timerSecRef = useRef(timerDuration);
 
   // Start / stop the interval whenever DISCUSSING state or pause flag changes.
   useEffect(() => {
     clearInterval(timerRef.current);
     if (gameState === STATES.DISCUSSING && !paused) {
       timerRef.current = setInterval(() => {
-        setTimerSec((s) => {
-          if (s <= 1) {
-            clearInterval(timerRef.current);
-            send(EVENTS.TIMER_DONE);
-            return 0;
-          }
-          return s - 1;
-        });
+        timerSecRef.current -= 1;
+        const next = timerSecRef.current;
+        setTimerSec(next);
+        if (next <= 0) {
+          clearInterval(timerRef.current);
+          send(EVENTS.TIMER_DONE);
+        }
       }, 1000);
     }
     return () => clearInterval(timerRef.current);
@@ -31,6 +33,7 @@ export function useTimer(gameState, send, timerDuration) {
   // Reset to full duration every time we enter DISCUSSING.
   useEffect(() => {
     if (gameState === STATES.DISCUSSING) {
+      timerSecRef.current = timerDuration;
       setTimerSec(timerDuration);
       setPaused(false);
     }

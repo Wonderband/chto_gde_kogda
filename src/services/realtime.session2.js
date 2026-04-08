@@ -6,7 +6,7 @@ function delay(ms) {
 }
 
 function isRu(gameContext = {}) {
-  return (gameContext.game_language || "ru") !== "uk";
+  return (gameContext.game_language || "uk") !== "uk";
 }
 
 function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
@@ -16,41 +16,39 @@ function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
       ? "Досрочный ответ. Кто будет отвечать?"
       : "Дострокова відповідь. Хто відповідатиме?"
     : ru
-      ? "Время вышло. Кто будет отвечать?"
-      : "Час вийшов. Хто відповідатиме?";
+    ? "Время вышло. Кто будет отвечать?"
+    : "Час вийшов. Хто відповідатиме?";
 
   return `${buildModeratorBaseInstructions("")}
 
-ТЕКУЩАЯ ФАЗА: КОРОТКАЯ ЗАЩИЩЁННАЯ РЕПЛИКА ПЕРЕД ЗАПИСЬЮ ОТВЕТА.
+ПОТОЧНА ФАЗА: КОРОТКА ЗАХИЩЕНА РЕПЛІКА ПЕРЕД ЗАПИСОМ ВІДПОВІДІ.
 
-Скажи РОВНО ЭТУ фразу и сразу замолчи:
+Скажи РІВНО ЦЮ фразу і одразу замовкни:
 «${line}»
 
-ЖЁСТКИЕ ЗАПРЕТЫ:
-- не добавляй вторую фразу,
-- не комментируй игру,
-- не объявляй правильный ответ,
-- не задавай уточняющих вопросов.`;
+ЖОРСТКІ ЗАБОРОНИ:
+- не додавай другу фразу,
+- не коментуй гру,
+- не оголошуй правильну відповідь,
+- не став уточнювальних запитань.`;
 }
 
 function buildVerdictCuePrompt(gameContext = {}, evaluation = {}) {
-  const fallback = isRu(gameContext)
-    ? "Ответ принят."
-    : "Відповідь прийнято.";
+  const fallback = isRu(gameContext) ? "Ответ принят." : "Відповідь прийнято.";
   const phrase = (evaluation?.moderator_phrase || fallback).trim();
 
   return `${buildModeratorBaseInstructions("")}
 
-ТЕКУЩАЯ ФАЗА: КОРОТКИЙ ЗАЩИЩЁННЫЙ ВЕРДИКТ ПОСЛЕ ОЦЕНКИ.
+ПОТОЧНА ФАЗА: КОРОТКИЙ ЗАХИЩЕНИЙ ВЕРДИКТ ПІСЛЯ ОЦІНКИ.
 
-Скажи РОВНО ЭТУ фразу и сразу замолчи:
+Скажи РІВНО ЦЮ фразу і одразу замовкни:
 «${phrase}»
 
-ЖЁСТКИЕ ЗАПРЕТЫ:
-- не добавляй новый комментарий,
-- не меняй смысл фразы,
-- не задавай вопросов,
-- не начинай следующий раунд.`;
+ЖОРСТКІ ЗАБОРОНИ:
+- не додавай новий коментар,
+- не змінюй смисл фрази,
+- не став запитань,
+- не починай наступний раунд.`;
 }
 
 async function waitForCompletedSpokenTurn(
@@ -82,7 +80,9 @@ async function waitForCompletedSpokenTurn(
 
   if (status !== "completed") {
     throw new Error(
-      `${stage} did not complete cleanly (status=${status}, reason=${reason || ""})`
+      `${stage} did not complete cleanly (status=${status}, reason=${
+        reason || ""
+      })`
     );
   }
 }
@@ -150,11 +150,15 @@ export async function playVerdictCue({
   );
 }
 
-export async function playNeutralSegueCue({ session, systemPrompt, gameContext }) {
+export async function playNeutralSegueCue({
+  session,
+  systemPrompt,
+  gameContext,
+}) {
   const ru = isRu(gameContext);
   const line = ru
     ? "А теперь — к правильному ответу."
-    : "А тепер — до правильної відповіді.";
+    : "А тепер — правильна відповідь.";
 
   await session.setMonologueMode({
     tools: [],
@@ -164,14 +168,14 @@ export async function playNeutralSegueCue({ session, systemPrompt, gameContext }
   const created = await session.createResponse({
     instructions: `${buildModeratorBaseInstructions("")}
 
-ТЕКУЩАЯ ФАЗА: КРАТКИЙ ПЕРЕХОД К ОБЪЯСНЕНИЮ.
+ПОТОЧНА ФАЗА: КОРОТКИЙ ПЕРЕХІД ДО ПОЯСНЕННЯ.
 
-Скажи РОВНО ЭТУ фразу и сразу замолчи:
+Скажи РІВНО ЦЮ фразу і одразу замовкни:
 «${line}»
 
-ЖЁСТКИЕ ЗАПРЕТЫ:
-- не называй ответ, не объявляй вердикт,
-- не добавляй ни слова.`,
+ЖОРСТКІ ЗАБОРОНИ:
+- не називай відповідь, не оголошуй вердикт,
+- не додавай жодного слова.`,
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "segue_cue" },
@@ -182,7 +186,12 @@ export async function playNeutralSegueCue({ session, systemPrompt, gameContext }
     responseId: created.responseId,
   });
 
-  await waitForCompletedSpokenTurn(session, created.responseId, "segue cue", 20000);
+  await waitForCompletedSpokenTurn(
+    session,
+    created.responseId,
+    "segue cue",
+    20000
+  );
 }
 
 export async function playExplanationCue({
@@ -201,15 +210,15 @@ export async function playExplanationCue({
   const created = await session.createResponse({
     instructions: `${buildModeratorBaseInstructions(systemPrompt)}
 
-ТЕКУЩАЯ ФАЗА: ЗАЧИТАЙ ОБЪЯСНЕНИЕ ДОСЛОВНО И ЗАМОЛЧИ.
+ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
 
-Прочитай РОВНО ЭТО:
+Прочитай РІВНО ЦЕ:
 «${text}»
 
-ЖЁСТКИЕ ЗАПРЕТЫ:
-- не добавляй ничего от себя,
-- не меняй ни слова,
-- не начинай следующий раунд.`,
+ЖОРСТКІ ЗАБОРОНИ:
+- не додавай нічого від себе,
+- не змінюй жодного слова,
+- не починай наступний раунд.`,
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "explanation_cue" },
@@ -242,25 +251,12 @@ export async function evaluateSessionTwo({
   const { evaluation, responseId } = await evaluateAnswerFn(gameContext, null);
 
   const correct = evaluation?.correct ?? false;
+  const correctAnswerReveal =
+    evaluation?.correct_answer_reveal ?? currentQuestion?.answer ?? "?";
+
+  // Return only the judgment — explanation is built by the caller (useGamePhaseEffects.buildSpeechText)
   return {
     responseId,
-    evaluation: {
-      ...evaluation,
-      correct,
-      score_delta: evaluation?.score_delta ?? 1,
-      who_scores: evaluation?.who_scores ?? (correct ? "experts" : "viewers"),
-      moderator_phrase:
-        evaluation?.moderator_phrase ||
-        (correct
-          ? "Ответ принят. Знатоки получают очко."
-          : "Ответ не принят. Очко получает телезритель."),
-      correct_answer_reveal:
-        evaluation?.correct_answer_reveal ?? currentQuestion?.answer ?? "?",
-      explanation:
-        evaluation?.explanation ||
-        (correct
-          ? `Знатоки ответили правильно. Правильный ответ: ${evaluation?.correct_answer_reveal ?? "?"}.`
-          : `К сожалению, знатоки ошиблись. Правильный ответ: ${evaluation?.correct_answer_reveal ?? "?"}.`),
-    },
+    evaluation: { correct, correct_answer_reveal: correctAnswerReveal },
   };
 }

@@ -1,13 +1,16 @@
 const CHARACTER_META = {
-  'Walter White':    { city: 'Альбукерке, Нью-Мексико', img: '/characters/walter.jpg', desc: 'вчитель хімії' },
-  'Jesse Pinkman':  { city: 'Альбукерке, Нью-Мексико', img: '/characters/jesse.jpg',  desc: 'вуличний хімік' },
-  'Saul Goodman':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/saul.jpg',   desc: 'адвокат' },
-  'Skyler White':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/skyler.jpg', desc: 'бухгалтер' },
-  'Hank Schrader':  { city: 'Альбукерке, Нью-Мексико', img: '/characters/hank.jpg',   desc: 'агент DEA' },
-  'Mike Ehrmantraut': { city: 'Філадельфія',            img: '/characters/mike.jpg',   desc: 'фіксер' },
-  'Gustavo Fring':  { city: 'Сантьяго, Чилі',          img: '/characters/gus.jpg',    desc: 'власник Pollos Hermanos' },
-  'Jane Margolis':  { city: 'Альбукерке, Нью-Мексико', img: '/characters/jane.jpg',   desc: 'художниця' },
-  'Todd Alquist':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/todd.jpg',   desc: 'хімік-самоук' },
+  'Walter White':     { city: 'Альбукерке, Нью-Мексико', img: '/characters/walter.jpg', desc: 'вчитель хімії' },
+  'Jesse Pinkman':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/jesse.jpg',  desc: 'вуличний хімік' },
+  'Saul Goodman':    { city: 'Альбукерке, Нью-Мексико', img: '/characters/saul.jpg',   desc: 'адвокат' },
+  'Skyler White':    { city: 'Альбукерке, Нью-Мексико', img: '/characters/skyler.jpg', desc: 'бухгалтер' },
+  'Hank Schrader':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/hank.jpg',   desc: 'агент DEA' },
+  'Mike Ehrmantraut':{ city: 'Філадельфія',              img: '/characters/mike.jpg',   desc: 'фіксер' },
+  'Gustavo Fring':   { city: 'Сантьяго, Чилі',          img: '/characters/gus.jpg',    desc: 'власник Pollos Hermanos' },
+  'Jane Margolis':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/jane.jpg',   desc: 'художниця' },
+  'Todd Alquist':    { city: 'Альбукерке, Нью-Мексико', img: '/characters/todd.jpg',   desc: 'хімік-самоучка' },
+  'Tuco Salamanca':  { city: 'Альбукерке, Нью-Мексико', img: '/characters/tuco.jpg',   desc: 'дилер наркотиків' },
+  'Gale Boetticher': { city: 'Альбукерке, Нью-Мексико', img: '/characters/gale.jpg',   desc: 'хімік-лаборант' },
+  'Walter White Jr.':{ city: 'Альбукерке, Нью-Мексико', img: '/characters/flynn.jpg',  desc: 'син Волтера Вайта' },
 }
 
 const ROUND_LABELS = {

@@ -66,9 +66,10 @@ export async function startWheelDialogue(session, systemPrompt, gameContext) {
 
   session.clearInputBuffer();
   session.setMicEnabled(true);
-  await delay(120);
 
-  console.log("[Realtime][Spin] simplest dialogue mode armed");
+  // Prime the audio output track before speaking — prevents the first word being clipped
+  await session.primeAudioOutput(8000);
+  console.log("[Realtime][Spin] simplest dialogue mode armed + audio primed");
 
   // Fire the opening line — model speaks first, then VAD handles the dialogue
   await session.createResponse({
@@ -111,22 +112,33 @@ export async function runSessionOneFlow({
   await session.primeAudioOutput(8000);
   console.log("[Realtime][Session1] read-session audio primed");
 
-  const introResponse = await session.createResponse({
-    instructions: buildSectorIntroPrompt(gameContext),
-    outputModalities: ["audio"],
-    metadata: { stage: "sector_intro" },
-    maxOutputTokens: TOKENS.SECTOR_INTRO,
-  });
+  // Blitz Q2/Q3: skip sector + character intro — already done for Q1
+  const blitzPos = gameContext?.current_question?.blitz_position || 1;
+  const isBlitzContinuation =
+    gameContext?.current_question?.round_type === "blitz" && blitzPos > 1;
 
-  console.log("[Realtime][Session1] sector intro response created", {
-    responseId: introResponse.responseId,
-  });
+  if (!isBlitzContinuation) {
+    const introResponse = await session.createResponse({
+      instructions: buildSectorIntroPrompt(gameContext),
+      outputModalities: ["audio"],
+      metadata: { stage: "sector_intro" },
+      maxOutputTokens: TOKENS.SECTOR_INTRO,
+    });
 
-  await waitForCompletedSpokenTurn(
-    session,
-    introResponse.responseId,
-    "sector intro"
-  );
+    console.log("[Realtime][Session1] sector intro response created", {
+      responseId: introResponse.responseId,
+    });
+
+    await waitForCompletedSpokenTurn(
+      session,
+      introResponse.responseId,
+      "sector intro"
+    );
+  } else {
+    console.log("[Realtime][Session1] blitz continuation — sector intro skipped", {
+      blitzPos,
+    });
+  }
 
   const questionResponse = await session.createResponse({
     instructions: buildQuestionReadPrompt(gameContext),

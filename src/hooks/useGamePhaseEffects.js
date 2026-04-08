@@ -23,6 +23,34 @@ import { GAME_LANGUAGE, REALTIME_VOICE } from "../config.js";
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 
 /**
+ * Builds the full spoken explanation text from hard-coded material — no AI generation.
+ * Structure: hint_for_evaluator (verbatim) → verdict sentence → score sentence.
+ */
+function buildSpeechText(q, evaluation, score, blitzQueue, lang) {
+  const isUk = lang !== "ru";
+  const hint = q?.hint_for_evaluator || "";
+  const correct = evaluation.correct;
+  const isBlitzIntermediate = evaluation.blitz_intermediate;
+
+  const verdictLine = correct
+    ? (isUk ? "І ваша відповідь правильна." : "И ваш ответ правильный.")
+    : (isUk ? "На жаль, знавці помилилися." : "К сожалению, знатоки ошиблись.");
+
+  let scoreLine;
+  if (isBlitzIntermediate) {
+    scoreLine = isUk ? "Продовжуємо бліц!" : "Продолжаем блиц!";
+  } else {
+    const newExperts = score.experts + (correct ? 1 : 0);
+    const newViewers = score.viewers + (correct ? 0 : 1);
+    scoreLine = isUk
+      ? `Рахунок стає ${newExperts}:${newViewers}.`
+      : `Счёт становится ${newExperts}:${newViewers}.`;
+  }
+
+  return [hint, verdictLine, scoreLine].filter(Boolean).join(" ");
+}
+
+/**
  * Drives all game-phase side-effects (SPINNING → READING → LISTENING →
  * EVALUATING → SCORING).  Also owns the recording state and the ttsPlaying
  * indicator used by the ModeratorVoice component.
@@ -346,28 +374,27 @@ export function useGamePhaseEffects({
           if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
 
           const correct = result.correct ?? false;
+          const correctAnswerReveal = result.correct_answer_reveal ?? currentQuestion?.answer ?? "?";
+          const isBlitzIntermediate = (blitzQueue?.length ?? 0) > 0 && correct === true;
+          const partialEval = { correct, blitz_intermediate: isBlitzIntermediate, correct_answer_reveal: correctAnswerReveal };
+          const explanation = buildSpeechText(currentQuestion, partialEval, score, blitzQueue, GAME_LANGUAGE);
           send(EVENTS.EVALUATION_DONE, {
-            ...result,
             correct,
-            score_delta: result.score_delta ?? 1,
-            who_scores: result.who_scores ?? (correct ? "experts" : "viewers"),
-            moderator_phrase:
-              result.moderator_phrase ||
-              (correct
-                ? "Ответ принят. Знатоки получают очко."
-                : "Ответ не принят. Очко получает телезритель."),
-            correct_answer_reveal:
-              result.correct_answer_reveal ?? currentQuestion?.answer ?? "?",
+            who_scores: correct ? "experts" : "viewers",
+            correct_answer_reveal: correctAnswerReveal,
+            blitz_intermediate: isBlitzIntermediate,
+            explanation,
           });
         } catch (err) {
           console.error("[Evaluation failed]", err);
           if (!cancelled) {
+            const fallbackEval = { correct: false, blitz_intermediate: false, correct_answer_reveal: currentQuestion?.answer || "?" };
             send(EVENTS.EVALUATION_DONE, {
               correct: false,
-              score_delta: 1,
               who_scores: "viewers",
-              moderator_phrase: "Ответ не принят. Очко получает телезритель.",
               correct_answer_reveal: currentQuestion?.answer || "?",
+              blitz_intermediate: false,
+              explanation: buildSpeechText(currentQuestion, fallbackEval, score, blitzQueue, GAME_LANGUAGE),
             });
           }
         }
@@ -386,15 +413,27 @@ export function useGamePhaseEffects({
           state.lastResponseId
         );
         if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
-        send(EVENTS.EVALUATION_DONE, result);
+        const correct = result.correct ?? false;
+        const correctAnswerReveal = result.correct_answer_reveal ?? currentQuestion?.answer ?? "?";
+        const isBlitzIntermediate = (blitzQueue?.length ?? 0) > 0 && correct === true;
+        const partialEval = { correct, blitz_intermediate: isBlitzIntermediate, correct_answer_reveal: correctAnswerReveal };
+        const explanation = buildSpeechText(currentQuestion, partialEval, score, blitzQueue, GAME_LANGUAGE);
+        send(EVENTS.EVALUATION_DONE, {
+          correct,
+          who_scores: correct ? "experts" : "viewers",
+          correct_answer_reveal: correctAnswerReveal,
+          blitz_intermediate: isBlitzIntermediate,
+          explanation,
+        });
       } catch (e) {
         console.error(e);
+        const fallbackEval = { correct: false, blitz_intermediate: false, correct_answer_reveal: currentQuestion?.answer || "?" };
         send(EVENTS.EVALUATION_DONE, {
           correct: false,
-          score_delta: 1,
           who_scores: "viewers",
-          moderator_phrase: "Відповідь не зараховано.",
           correct_answer_reveal: currentQuestion?.answer || "?",
+          blitz_intermediate: false,
+          explanation: buildSpeechText(currentQuestion, fallbackEval, score, blitzQueue, GAME_LANGUAGE),
         });
       }
     })();
@@ -490,6 +529,7 @@ export function useGamePhaseEffects({
     // Mock mode: TTS is acceptable here (voice inconsistency only matters in real mode)
     (async () => {
       try {
+        // explanation is pre-built by buildSpeechText in EVALUATING: hint + verdict + score
         await tts(evaluation.explanation || evaluation.correct_answer_reveal || "");
       } catch (e) {
         console.error("[EXPLAINING mock]", e);

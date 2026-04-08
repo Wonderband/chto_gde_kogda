@@ -117,35 +117,31 @@ function reducer(state, action) {
       };
 
     case EVENTS.SCORING_DONE: {
+      // Always go to EXPLAINING — each question (including intermediate blitz) gets
+      // its own full evaluation ritual (intrigue → answer reveal → verdict).
+      // Blitz advancement and score application are both handled in EXPLAINING_DONE.
+      return { ...state, gameState: STATES.EXPLAINING };
+    }
+
+    case EVENTS.EXPLAINING_DONE: {
       const { who_scores } = state.evaluation;
 
-      // Blitz continuation: more sub-questions remain AND last answer was correct
-      // EXPLAINING is skipped for blitz — go straight to next question
-      if (state.blitzQueue.length > 0 && who_scores === "experts") {
+      // Intermediate blitz: explicit flag set at evaluation time → advance without scoring
+      if (state.evaluation?.blitz_intermediate === true) {
         const [nextQ, ...blitzRemaining] = state.blitzQueue;
+        // roundNumber stays the same — Q2/Q3 are part of the same blitz round as Q1
         return {
           ...state,
           gameState: STATES.READING,
           currentQuestion: nextQ,
           blitzQueue: blitzRemaining,
-          roundNumber: state.roundNumber + 1,
           transcript: "",
           evaluation: null,
           earlyAnswer: false,
         };
       }
 
-      // Non-blitz: go to EXPLAINING — score NOT applied yet (deferred to EXPLAINING_DONE)
-      return {
-        ...state,
-        blitzQueue: [],
-        gameState: STATES.EXPLAINING,
-      };
-    }
-
-    case EVENTS.EXPLAINING_DONE: {
-      // Score is applied here, after the moderator has finished narrating
-      const { who_scores } = state.evaluation;
+      // Final blitz question (all correct or wrong answer) OR standard question → apply score
       const newScore = {
         experts: state.score.experts + (who_scores === "experts" ? 1 : 0),
         viewers: state.score.viewers + (who_scores === "viewers" ? 1 : 0),
@@ -156,6 +152,7 @@ function reducer(state, action) {
       return {
         ...state,
         score: newScore,
+        blitzQueue: [],
         gameState: isOver ? STATES.GAME_OVER : STATES.READY,
         winner: expertWon ? "experts" : viewerWon ? "viewers" : null,
       };

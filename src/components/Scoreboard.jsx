@@ -31,7 +31,7 @@ export default function Scoreboard() {
 
       {/* ── ЗНАТОКИ (left) ── */}
       <div className="team-panel experts-panel">
-        <div className="team-label">ЗНАТОКИ</div>
+        <div className="team-label">ЗНАВЦІ</div>
         <div className="team-scores">
           <ScoreDigit value={score.experts} color="var(--score-experts)" />
         </div>
