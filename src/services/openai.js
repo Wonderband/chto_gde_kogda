@@ -1,26 +1,15 @@
 /**
- * OpenAI Responses API — Game Brain (Voroshilov moderator)
+ * OpenAI Responses API — Answer evaluator + script builder
  *
- * - Local deterministic script building for question reading.
- * - Text Responses API for evaluation/commentary.
- * - Cheap structured-output evaluator for Session 2.
+ * - Local deterministic script building for question reading (buildReadScript).
+ * - Structured-output evaluator for answer judgment (evaluateAnswer, evaluateAnswerFast).
  */
 
-import { mockEvaluateAnswer, mockCommentary } from './mock'
-import { RESPONSES_MODEL, EVALUATOR_MODEL, FAST_EVALUATOR_MODEL } from '../config.js'
+import { mockEvaluateAnswer } from './mock'
+import { EVALUATOR_MODEL, FAST_EVALUATOR_MODEL } from '../config.js'
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const API_URL = 'https://api.openai.com/v1/responses'
-
-// Cached system prompt (loaded once from public/system-prompt.txt)
-let SYSTEM_PROMPT = null
-
-async function getSystemPrompt() {
-  if (SYSTEM_PROMPT) return SYSTEM_PROMPT
-  const res = await fetch('/system-prompt.txt')
-  SYSTEM_PROMPT = res.ok ? await res.text() : ''
-  return SYSTEM_PROMPT
-}
 
 function extractOutputText(data) {
   if (typeof data?.output_text === 'string' && data.output_text) {
@@ -130,7 +119,7 @@ export function buildListeningScript(earlyAnswer, gameLanguage) {
     : 'Стоп! Час! Пане капітане, хто відповідає?'
 }
 
-// ─── Core Responses API call ──────────────────────────────────────────────────
+// ─── Responses API ────────────────────────────────────────────────────────────
 
 async function postResponses(body) {
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY
@@ -153,24 +142,6 @@ async function postResponses(body) {
   return response.json()
 }
 
-async function callOpenAI(gameContext, previousResponseId) {
-  const vectorStoreId = import.meta.env.VITE_VECTOR_STORE_ID
-  const instructions = await getSystemPrompt()
-
-  const body = {
-    model: RESPONSES_MODEL,
-    instructions,
-    input: JSON.stringify(gameContext),
-    ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-    ...(vectorStoreId && vectorStoreId !== 'vs_placeholder'
-      ? { tools: [{ type: 'file_search', vector_store_ids: [vectorStoreId] }] }
-      : {}),
-  }
-
-  const data = await postResponses(body)
-  return { text: extractOutputText(data), responseId: data.id }
-}
-
 function buildEvaluationInstructions() {
   return [
     'Ти — суддя відповідей у грі «Що? Де? Коли?».',
@@ -178,11 +149,18 @@ function buildEvaluationInstructions() {
     '',
     'ПРАВИЛА ПРИЙНЯТТЯ:',
     '1. Відповідь правильна, якщо містить усі ключові факти з правильної відповіді або прийнятних варіантів — навіть у розгорнутому чи пояснювальному форматі.',
-    '2. Транслітерації між мовами ПРИЙНЯТНІ (Schwartz = Шварц; Fe = залізо = ferrum = iron — все це одне й те саме).',
-    '3. ВІДХИЛЯЙ, якщо відповідь є перекладом власного імені або специфічного терміна, що звучить ПОВНІСТЮ ІНАКШЕ, ніж правильна відповідь і відсутній у прийнятних варіантах. Приклад: «Black» — НЕ правильна відповідь, якщо правильна відповідь «Schwartz», навіть якщо «Schwartz» означає «чорний» по-німецьки. Ключова ознака: різне звучання + переклад замість оригінального слова.',
+    '2. Транслітерації між мовами ПРИЙНЯТНІ — кириличне написання іноземного слова дорівнює оригіналу (Джуніор = Junior; Флінн = Flynn; Шварц = Schwartz). Якщо звучання схоже — це одна й та сама відповідь. Це стосується і різних кириличних написань одного іноземного імені: Вітмен = Уїтмен = Whitman; Флін = Флінн; Вайт = Уайт. Орфографічні варіанти одного звучання є рівнозначними.',
+    '2а. Граматичні форми слова ПРИЙНЯТНІ — відмінювання, відмінки, число не змінюють суті відповіді (Волтерів = Волтер; змінами = зміни; трансформацією = трансформація). Якщо корінь слова збігається з правильною відповіддю або прийнятним варіантом — відповідь правильна.',
+    '3. Парафраз прийнятний ТІЛЬКИ для ідентифікації ЛЮДЕЙ та ВЛАСНИХ НАЗВ (наприклад, «син Волтера» = «Walter White Jr», «дружина» = «Скайлер»). Для всіх інших відповідей (поняття, слова, назви серій, хімічні елементи) — ТІЛЬКИ точний збіг з Correct answer або Accepted variants, транслітерація або граматична форма того самого слова. ЗАБОРОНЕНО: приймати семантичні синоніми як правильну відповідь. «перетворення» ≠ «зміни». «реакції» ≠ «зміни». «мутація» ≠ «трансформація». Якщо слово відсутнє у Correct answer та Accepted variants — відхиляй.',
+    '3а. СКЛАДЕНІ відповіді (кілька фактів): якщо питання вимагає кілька елементів і ВСІ вони присутні у відповіді команди (навіть розкидані по довгому поясненні) — відповідь правильна. Перевіряй кожен обов\'язковий елемент окремо.',
+    '4. ВІДХИЛЯЙ, якщо відповідь є перекладом власного імені або специфічного терміна, що звучить ПОВНІСТЮ ІНАКШЕ і не ідентифікує однозначно правильну особу. Приклад: «Black» — НЕ правильна відповідь, якщо правильна відповідь «Schwartz», бо «Black» та «Schwartz» — різні слова з різним звучанням, хоч і однаковим значенням. Ключова ознака: різне звучання + переклад значення замість ідентифікації особи.',
+    '5. ВІДХИЛЯЙ лише якщо ВЕСЬ текст відповіді є беззмістовним шумом, технічним повідомленням системи або взагалі не стосується питання. Якщо серед шуму є хоча б одне слово або фраза, що відповідає правильній відповіді чи прийнятному варіанту — ПРИЙМАЙ. Приклад: «Давид-давид... тобто це дружина» містить слово «дружина» — відповідь правильна.',
+    '6. УВАГА — правильне ім\'я у другорядній ролі НЕ є відповіддю: якщо команда називає одну особу своєю відповіддю, а правильне ім\'я згадує лише як другорядну деталь (наприклад, «ведмедик передбачив долю Джейн, бо її вбив Густаво Фрінг» — суб\'єкт відповіді тут Джейн, Фрінг лише деталь), відповідь НЕПРАВИЛЬНА. Визнач, кого команда НАЗИВАЄ своєю відповіддю, а не просто згадує.',
     '',
-    'Поверни ТІЛЬКИ JSON без жодних пояснень поза JSON.',
-    'correct_answer_reveal — канонічний текст правильної відповіді (скопіюй з Correct answer або виправ до найпоширенішої форми).',
+    'Поверни JSON з трьома полями:',
+    '- reasoning: спочатку виклади своє міркування — перелічи всі ключові факти з правильної відповіді та чи присутній кожен з них у відповіді команди. Для складених відповідей перевіряй кожен елемент окремо.',
+    '- correct: true або false — лише після того, як виклав міркування.',
+    '- correct_answer_reveal: канонічний текст правильної відповіді (скопіюй з Correct answer).',
   ].join('\n')
 }
 
@@ -198,7 +176,6 @@ function buildEvaluationInput(gameContext) {
     `Question: ${q.question_text || ''}`,
     `Correct answer: ${q.correct_answer || ''}`,
     q.answer_variants?.length ? `Accepted variants: ${q.answer_variants.join(', ')}` : '',
-    q.hint_for_evaluator ? `Evaluator hint: ${q.hint_for_evaluator}` : '',
     `Team answer: ${gameContext.team_answer_transcript || ''}`,
     gameContext.score
       ? `Current score — experts: ${gameContext.score.experts}, viewers: ${gameContext.score.viewers}`
@@ -214,8 +191,9 @@ function evaluationSchema() {
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['correct', 'correct_answer_reveal'],
+      required: ['reasoning', 'correct', 'correct_answer_reveal'],
       properties: {
+        reasoning: { type: 'string' },
         correct: { type: 'boolean' },
         correct_answer_reveal: { type: 'string' },
       },
@@ -245,7 +223,8 @@ async function callStructuredEvaluation(gameContext) {
 
   const parsed = data?.output_parsed
   if (parsed && typeof parsed === 'object') {
-    console.log('[Evaluator][OUTPUT]', parsed)
+    console.log('[Evaluator][REASONING]', parsed.reasoning)
+    console.log('[Evaluator][OUTPUT]', { correct: parsed.correct, correct_answer_reveal: parsed.correct_answer_reveal })
     return { evaluation: parsed, responseId: data.id }
   }
 
@@ -278,14 +257,6 @@ export async function evaluateAnswer(gameContext, previousResponseId = null) {
   return callStructuredEvaluation({ ...gameContext, action: 'evaluate_answer' })
 }
 
-export async function commentary(gameContext, previousResponseId = null) {
-  if (USE_MOCK) {
-    const text = await mockCommentary(gameContext)
-    return { text, responseId: null }
-  }
-  return callOpenAI({ ...gameContext, action: 'commentary' }, previousResponseId)
-}
-
 export async function evaluateAnswerFast(transcript, question) {
   const gameContext = {
     game_language: 'en',
@@ -294,7 +265,6 @@ export async function evaluateAnswerFast(transcript, question) {
       question_text: question.question_text,
       correct_answer: question.correct_answer,
       answer_variants: question.answer_variants,
-      hint_for_evaluator: question.hint_for_evaluator,
     },
     team_answer_transcript: transcript,
   }

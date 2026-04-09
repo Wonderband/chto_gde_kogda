@@ -104,6 +104,7 @@ export function useGamePhaseEffects({
             correct_answer: currentQuestion.answer,
             answer_variants: currentQuestion.answer_variants,
             hint_for_evaluator: currentQuestion.hint_for_evaluator,
+            intro_flavor: currentQuestion.intro_flavor,
             round_type: currentQuestion.round_type,
             blitz_position: currentQuestion.blitz_position,
             blitz_group: currentQuestion.blitz_group,

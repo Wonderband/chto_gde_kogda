@@ -19,7 +19,8 @@ export function useRecording(isRecording, setIsRecording, recorderRef, send) {
     try {
       const blob = await stopRecording(recorderRef.current);
       recorderRef.current = null;
-      const transcript = await transcribeAudio(blob);
+      const transcript = (await transcribeAudio(blob)).trim();
+      console.log("[Transcribe][final]", { transcript, blobSize: blob?.size });
       send(EVENTS.RECORDING_DONE, transcript);
     } catch (e) {
       console.error(e);

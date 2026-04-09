@@ -19,36 +19,12 @@ function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
     ? "Время вышло. Кто будет отвечать?"
     : "Час вийшов. Хто відповідатиме?";
 
-  return `${buildModeratorBaseInstructions("")}
-
-ПОТОЧНА ФАЗА: КОРОТКА ЗАХИЩЕНА РЕПЛІКА ПЕРЕД ЗАПИСОМ ВІДПОВІДІ.
+  return `ПОТОЧНА ФАЗА: КОРОТКА РЕПЛІКА ПЕРЕД ЗАПИСОМ ВІДПОВІДІ.
 
 Скажи РІВНО ЦЮ фразу і одразу замовкни:
 «${line}»
 
-ЖОРСТКІ ЗАБОРОНИ:
-- не додавай другу фразу,
-- не коментуй гру,
-- не оголошуй правильну відповідь,
-- не став уточнювальних запитань.`;
-}
-
-function buildVerdictCuePrompt(gameContext = {}, evaluation = {}) {
-  const fallback = isRu(gameContext) ? "Ответ принят." : "Відповідь прийнято.";
-  const phrase = (evaluation?.moderator_phrase || fallback).trim();
-
-  return `${buildModeratorBaseInstructions("")}
-
-ПОТОЧНА ФАЗА: КОРОТКИЙ ЗАХИЩЕНИЙ ВЕРДИКТ ПІСЛЯ ОЦІНКИ.
-
-Скажи РІВНО ЦЮ фразу і одразу замовкни:
-«${phrase}»
-
-ЖОРСТКІ ЗАБОРОНИ:
-- не додавай новий коментар,
-- не змінюй смисл фрази,
-- не став запитань,
-- не починай наступний раунд.`;
+Не додавай другу фразу. Не коментуй гру. Не оголошуй правильну відповідь.`;
 }
 
 async function waitForCompletedSpokenTurn(
@@ -119,37 +95,6 @@ export async function playListeningCue({
   );
 }
 
-export async function playVerdictCue({
-  session,
-  systemPrompt,
-  gameContext,
-  evaluation,
-}) {
-  await session.setMonologueMode({
-    tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
-  });
-
-  const created = await session.createResponse({
-    instructions: buildVerdictCuePrompt(gameContext, evaluation),
-    tools: [],
-    outputModalities: ["audio"],
-    metadata: { stage: "session2_verdict" },
-    maxOutputTokens: TOKENS.VERDICT_CUE,
-  });
-
-  console.log("[Realtime][Session2] verdict response created", {
-    responseId: created.responseId,
-  });
-
-  await waitForCompletedSpokenTurn(
-    session,
-    created.responseId,
-    "verdict cue",
-    30000
-  );
-}
-
 export async function playNeutralSegueCue({
   session,
   systemPrompt,
@@ -166,16 +111,12 @@ export async function playNeutralSegueCue({
   });
 
   const created = await session.createResponse({
-    instructions: `${buildModeratorBaseInstructions("")}
-
-ПОТОЧНА ФАЗА: КОРОТКИЙ ПЕРЕХІД ДО ПОЯСНЕННЯ.
+    instructions: `ПОТОЧНА ФАЗА: КОРОТКИЙ ПЕРЕХІД ДО ПОЯСНЕННЯ.
 
 Скажи РІВНО ЦЮ фразу і одразу замовкни:
 «${line}»
 
-ЖОРСТКІ ЗАБОРОНИ:
-- не називай відповідь, не оголошуй вердикт,
-- не додавай жодного слова.`,
+Не називай відповідь. Не додавай жодного слова.`,
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "segue_cue" },
@@ -208,17 +149,12 @@ export async function playExplanationCue({
 
   // No setMonologueMode call — session is already in monologue mode from segue cue
   const created = await session.createResponse({
-    instructions: `${buildModeratorBaseInstructions(systemPrompt)}
-
-ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
+    instructions: `ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
 
 Прочитай РІВНО ЦЕ:
 «${text}»
 
-ЖОРСТКІ ЗАБОРОНИ:
-- не додавай нічого від себе,
-- не змінюй жодного слова,
-- не починай наступний раунд.`,
+Не додавай нічого від себе. Не змінюй жодного слова. Не починай наступний раунд.`,
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "explanation_cue" },

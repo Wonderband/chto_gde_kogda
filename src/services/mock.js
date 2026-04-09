@@ -61,15 +61,6 @@ export async function mockEvaluateAnswer(context) {
   }
 }
 
-export async function mockCommentary(context) {
-  await delay(500)
-  const { score } = context
-  if (score.experts === score.viewers) {
-    return `Рахунок рівний — ${score.experts}:${score.viewers}. Напруження наростає. Продовжуємо!`
-  }
-  return `Що наше життя? Гра!`
-}
-
 // ── Whisper mock ──────────────────────────────────────────────────────────────
 
 // Returns a random plausible-looking transcript
