@@ -51,7 +51,7 @@ export const TRANSCRIBE_MODEL = e.VITE_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcri
 /** Responses API model for main moderator (mock/fallback mode) */
 export const RESPONSES_MODEL  = e.VITE_RESPONSES_MODEL  || 'gpt-4o'
 /** Cheap text-only model for answer evaluation + explanation generation */
-export const EVALUATOR_MODEL  = e.VITE_EVALUATOR_MODEL  || 'gpt-4.1-nano'
+export const EVALUATOR_MODEL  = e.VITE_EVALUATOR_MODEL  || 'gpt-4.1-mini'
 /** Fast evaluator override (defaults to EVALUATOR_MODEL) */
 export const FAST_EVALUATOR_MODEL = e.VITE_FAST_EVALUATOR_MODEL || EVALUATOR_MODEL
 
@@ -63,9 +63,9 @@ export const FAST_EVALUATOR_MODEL = e.VITE_FAST_EVALUATOR_MODEL || EVALUATOR_MOD
  */
 export const TOKENS = {
   WHEEL_OPENING:   120,   // spinning phase opener          (~2–3 s)
-  SECTOR_INTRO:    220,   // sector + character + flavor    (~5–6 s)
+  SECTOR_INTRO:    500,   // sector + character + flavor    (~10–12 s, 3 sentences)
   LISTENING_CUE:   220,   // "Стоп!" announcement           (~4–5 s)
-  VERDICT_CUE:     320,   // short verdict (legacy, unused) (~6–7 s)
+  VERDICT_CUE:     320,   // short verdict (legacy, unused)
   SEGUE_CUE:       200,   // "А теперь — к правильному…"    (~3–4 s)
   EXPLANATION_CUE: 1000,  // full explanation narrative     (~20–30 s)
 }
