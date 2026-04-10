@@ -153,6 +153,7 @@ export default function Roulette({
   const openTimer = useRef(null);
   const onStopRef = useRef(onStop);
   const onTargetRef = useRef(onTarget);
+  const stoppedRef = useRef(false); // true after natural stop fires, until spinning resets
 
   useEffect(() => {
     onStopRef.current = onStop;
@@ -171,12 +172,13 @@ export default function Roulette({
 
   useEffect(() => {
     if (!spinning) {
+      stoppedRef.current = false; // reset for the next spin
       console.log("[Roulette][effect idle]", { spinning, isAnimating });
       return () => clearTimeout(spinTimer.current);
     }
 
-    if (isAnimating) {
-      console.log("[Roulette][effect already animating]");
+    if (isAnimating || stoppedRef.current) {
+      console.log("[Roulette][effect already animating or stopped]", { isAnimating, stopped: stoppedRef.current });
       return;
     }
 
@@ -207,6 +209,7 @@ export default function Roulette({
     clearTimeout(spinTimer.current);
     spinTimer.current = setTimeout(() => {
       console.log("[Roulette][timeout fired]", { target, dur });
+      stoppedRef.current = true; // block re-trigger while parent processes async stop
       setIsAnimating(false);
       onStopRef.current?.(target);
     }, dur);

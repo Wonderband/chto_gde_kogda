@@ -260,18 +260,25 @@ export class RealtimeSession {
     eagerness = "low",
     interruptResponse = true,
     createResponse = true,
+    silenceDurationMs = null, // if set, uses server_vad instead of semantic_vad
   } = {}) {
     this.setMicEnabled(true);
-    const patch = {
-      tools,
-      tool_choice: "auto",
-      turn_detection: {
-        type: "semantic_vad",
-        eagerness,
-        create_response: createResponse,
-        interrupt_response: interruptResponse,
-      },
-    };
+    const turn_detection = silenceDurationMs != null
+      ? {
+          type: "server_vad",
+          silence_duration_ms: silenceDurationMs,
+          prefix_padding_ms: 300,
+          threshold: 0.5,
+          create_response: createResponse,
+          interrupt_response: interruptResponse,
+        }
+      : {
+          type: "semantic_vad",
+          eagerness,
+          create_response: createResponse,
+          interrupt_response: interruptResponse,
+        };
+    const patch = { tools, tool_choice: "auto", turn_detection };
     if (instructions != null) patch.instructions = instructions;
     await this.updateSession(patch);
   }

@@ -3,7 +3,7 @@ import { STATES } from "../game/gameStateMachine";
 
 /**
  * Manages the two Realtime WebRTC session refs (pre-question + post-answer)
- * and loads the system prompt once on mount.
+ * and loads the system prompt and player config once on mount.
  *
  * Does NOT import RealtimeSession — callers create sessions themselves and
  * store references via preSessionRef / postSessionRef.
@@ -12,6 +12,7 @@ export function useRealtimeSessions(gameState) {
   const preSessionRef = useRef(null);   // Session 1: wheel spin → question read
   const postSessionRef = useRef(null);  // Session 2: listening cue → verdict
   const systemPromptRef = useRef(null); // Cached /system-prompt.txt content
+  const playersRef = useRef([]);        // Cached /players.json player list
 
   // Load system prompt once on mount.
   useEffect(() => {
@@ -25,9 +26,34 @@ export function useRealtimeSessions(gameState) {
       });
   }, []);
 
+  // Load player config once on mount.
+  useEffect(() => {
+    fetch("/players.json")
+      .then((r) => (r.ok ? r.json() : { players: [] }))
+      .then((data) => {
+        playersRef.current = data.players || [];
+      })
+      .catch(() => {
+        playersRef.current = [];
+      });
+  }, []);
+
   const closePreSession = useCallback(() => {
     preSessionRef.current?.close();
     preSessionRef.current = null;
+  }, []);
+
+  /** Waits for the session to reach idle (up to 3s), then closes it.
+   *  Falls back to immediate close on timeout so the caller is never stuck. */
+  const graceClosePreSession = useCallback(async () => {
+    const session = preSessionRef.current;
+    if (session) {
+      await session
+        .waitForGracefulIdleOrCancel({ quietMs: 400, timeoutMs: 8000 })
+        .catch(() => null);
+      session.close();
+      preSessionRef.current = null;
+    }
   }, []);
 
   const closePostSession = useCallback(() => {
@@ -47,7 +73,9 @@ export function useRealtimeSessions(gameState) {
     preSessionRef,
     postSessionRef,
     systemPromptRef,
+    playersRef,
     closePreSession,
+    graceClosePreSession,
     closePostSession,
   };
 }

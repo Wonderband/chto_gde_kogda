@@ -3,6 +3,7 @@ import { TOKENS } from "../config.js";
 import {
   buildModeratorBaseInstructions,
   buildWheelOpeningPrompt,
+  buildWheelReactionPrompt,
   buildSectorIntroPrompt,
   buildQuestionReadPrompt,
 } from "./realtime.prompts.js";
@@ -92,32 +93,90 @@ async function waitForCompletedSpokenTurn(session, responseId, label) {
   return doneEvent;
 }
 
-export async function startWheelDialogue(session, systemPrompt, gameContext) {
-  console.log("[Realtime][Spin] simplest dialogue mode start", {
+/** Lenient wait for a spoken turn — doesn't throw on non-completed status. */
+async function waitForSpokenTurn(session, responseId, label) {
+  try {
+    await session.waitForResponseDone(responseId, 20000);
+    await session.waitForAudioStopped(responseId, 10000);
+    await delay(300);
+  } catch (err) {
+    console.warn(`[Realtime][Spin] ${label} wait interrupted:`, err?.message);
+  }
+}
+
+/**
+ * Strict 3-step wheel dialogue:
+ *   1. Opening phrase (personal address / question)
+ *   2. Wait for player to respond
+ *   3. One short reaction phrase
+ *   Then silence — no further dialogue.
+ */
+export async function startWheelDialogue(session, systemPrompt, gameContext, {
+  delayMs = 5500,
+} = {}) {
+  console.log("[Realtime][Spin] strict dialogue start", {
     round: gameContext?.round_number,
+    delayMs,
   });
 
+  // server_vad fires speech_stopped ~silenceDurationMs after the user goes quiet —
+  // much faster than semantic_vad (which takes 3-5s to decide the turn is over).
   await session.setDialogueMode({
     tools: [],
     instructions: buildModeratorBaseInstructions(systemPrompt),
-    eagerness: "low",
-    interruptResponse: true,
-    createResponse: true,
+    silenceDurationMs: 700,
+    interruptResponse: false,
+    createResponse: false,
   });
 
   session.clearInputBuffer();
+  session.setMicEnabled(false); // mute during delay — no VAD false triggers
+
+  // ── Step 0: wait for music to settle and players to be ready ──
+  await delay(delayMs);
+
   session.setMicEnabled(true);
+  await session.primeAudioOutput(3000);
+  console.log("[Realtime][Spin] audio primed, opening phrase starting");
 
-  await session.primeAudioOutput(8000);
-  console.log("[Realtime][Spin] simplest dialogue mode armed + audio primed");
-
-  await session.createResponse({
+  // ── Step 1: opening phrase ──
+  const openingResponse = await session.createResponse({
     instructions: buildWheelOpeningPrompt(gameContext),
     outputModalities: ["audio"],
     maxOutputTokens: TOKENS.WHEEL_OPENING,
   });
+  await waitForSpokenTurn(session, openingResponse.responseId, "opening");
+  console.log("[Realtime][Spin] opening phrase done");
 
-  console.log("[Realtime][Spin] opening line triggered");
+  // Discard any audio buffered while the moderator was speaking
+  session.clearInputBuffer();
+
+  // ── Step 2: wait for player response ──
+  try {
+    await session.waitForUserSpeechStart(8000);
+    console.log("[Realtime][Spin] player started speaking");
+    await session.waitForUserSpeechStop(20000);
+    console.log("[Realtime][Spin] player finished speaking");
+    await delay(500); // let server commit the audio buffer
+
+    // ── Step 3: one reaction phrase ──
+    const reactionResponse = await session.createResponse({
+      instructions: buildWheelReactionPrompt(gameContext),
+      outputModalities: ["audio"],
+      maxOutputTokens: TOKENS.WHEEL_OPENING,
+    });
+    await waitForSpokenTurn(session, reactionResponse.responseId, "reaction");
+    console.log("[Realtime][Spin] reaction phrase done");
+  } catch {
+    // Player didn't respond or timed out — skip reaction gracefully
+    console.log("[Realtime][Spin] no player response — reaction skipped");
+  }
+
+  // ── Done: silence. Disable mic and VAD so nothing more is said. ──
+  await session.setMonologueMode({ tools: [] });
+  session.setMicEnabled(false);
+  console.log("[Realtime][Spin] dialogue complete, session silenced");
+
   return null;
 }
 

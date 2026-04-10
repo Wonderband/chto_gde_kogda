@@ -14,7 +14,7 @@ const e = import.meta.env;
 /** Points needed to win the game */
 export const WINNING_SCORE = Number(e.VITE_WINNING_SCORE) || 6;
 /** Roulette wheel spin duration in ms */
-export const SPIN_DURATION_MS = Number(e.VITE_SPIN_DURATION_MS) || 10_000;
+export const SPIN_DURATION_MS = Number(e.VITE_SPIN_DURATION_MS) || 30_000;
 /** Standard question discussion time in seconds */
 export const DISCUSSION_SEC = Number(e.VITE_DISCUSSION_SEC) || 60;
 /** Blitz question discussion time in seconds */
@@ -64,7 +64,7 @@ export const FAST_EVALUATOR_MODEL =
  * Increase if speech is cut off; decrease to save cost.
  */
 export const TOKENS = {
-  WHEEL_OPENING: 120, // spinning phase opener          (~2–3 s)
+  WHEEL_OPENING: 300, // spinning phase opener          (~5–7 s, personal address + reaction)
   SECTOR_INTRO: 500, // sector + character + flavor    (~10–12 s, 3 sentences)
   LISTENING_CUE: 220, // "Стоп!" announcement           (~4–5 s)
   VERDICT_CUE: 320, // short verdict (legacy, unused)

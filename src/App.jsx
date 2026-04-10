@@ -57,12 +57,14 @@ function Game() {
     preSessionRef,
     postSessionRef,
     systemPromptRef,
+    playersRef,
     closePreSession,
+    graceClosePreSession,
     closePostSession,
   } = useRealtimeSessions(gameState);
 
   const { selectedSector, handleRouletteTarget, handleRouletteStop } =
-    useRoulette(gameState, send, closePreSession);
+    useRoulette(gameState, send, graceClosePreSession);
 
   const {
     isRecording,
@@ -84,6 +86,7 @@ function Game() {
     preSessionRef,
     postSessionRef,
     systemPromptRef,
+    playersRef,
     closePreSession,
     closePostSession,
   });
