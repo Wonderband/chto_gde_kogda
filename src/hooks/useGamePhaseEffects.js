@@ -196,14 +196,18 @@ export function useGamePhaseEffects({
     music.volume = 0.35;
     music.play().catch(() => {});
 
-    if (USE_MOCK || !import.meta.env.VITE_OPENAI_API_KEY || !systemPromptRef.current) {
+    if (
+      USE_MOCK ||
+      !import.meta.env.VITE_OPENAI_API_KEY ||
+      !systemPromptRef.current
+    ) {
       return () => {
         music.pause();
         music.src = "";
       };
     }
 
-    const WHEEL_DELAY_MS = 5500;
+    const WHEEL_DELAY_MS = 4000;
 
     let cancelled = false;
 
@@ -233,12 +237,17 @@ export function useGamePhaseEffects({
         preSessionRef.current = session;
         console.log("[App][Spin session ready]");
 
-        await startWheelDialogue(session, systemPromptRef.current, {
-          round_number: roundNumber + 1,
-          score,
-          game_language: GAME_LANGUAGE,
-          players: playersRef?.current || [],
-        }, { delayMs: WHEEL_DELAY_MS });
+        await startWheelDialogue(
+          session,
+          systemPromptRef.current,
+          {
+            round_number: roundNumber + 1,
+            score,
+            game_language: GAME_LANGUAGE,
+            players: playersRef?.current || [],
+          },
+          { delayMs: WHEEL_DELAY_MS }
+        );
 
         if (cancelled) return;
         console.log("[App][Spin dialogue started]");
