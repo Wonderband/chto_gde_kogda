@@ -295,7 +295,7 @@ export function useGamePhaseEffects({
             apiKey,
             systemPrompt: systemPromptRef.current,
             voice: REALTIME_VOICE,
-            enableMic: false,
+            enableMic: true,
           });
           return readSession;
         };

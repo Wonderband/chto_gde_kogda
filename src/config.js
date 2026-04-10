@@ -64,10 +64,12 @@ export const FAST_EVALUATOR_MODEL =
  * Increase if speech is cut off; decrease to save cost.
  */
 export const TOKENS = {
-  WHEEL_OPENING: 300, // spinning phase opener          (~5–7 s, personal address + reaction)
-  SECTOR_INTRO: 500, // sector + character + flavor    (~10–12 s, 3 sentences)
-  LISTENING_CUE: 220, // "Стоп!" announcement           (~4–5 s)
-  VERDICT_CUE: 320, // short verdict (legacy, unused)
-  SEGUE_CUE: 200, // "А теперь — к правильному…"    (~3–4 s)
-  EXPLANATION_CUE: 1000, // full explanation narrative     (~20–30 s)
+  WHEEL_OPENING: 350,    // spinning phase opener            (~6–7 s, with player-specific detail + reaction)
+  COMBINED_INTRO: 400,  // sector + character + intro_flavor (~7 s, one monologue pass)
+  WARMUP_REACTION: 200, // warmup reaction phrase           (~3 s; +video cue when needed)
+  VIDEO_CUE: 150,       // standalone "увага на екран"      (~2 s, clean context only)
+  LISTENING_CUE: 220,  // "Стоп!" announcement           (~4–5 s)
+  VERDICT_CUE: 320,    // short verdict (legacy, unused)
+  SEGUE_CUE: 200,      // "А теперь — к правильному…"    (~3–4 s)
+  EXPLANATION_CUE: 1000, // full explanation narrative   (~20–30 s)
 };

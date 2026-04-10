@@ -4,9 +4,9 @@ export {
   TOOL_END_ROUND,
   buildModeratorBaseInstructions,
   buildQuestionReadPrompt,
-  buildSectorIntroPrompt,
-  buildWarmupPrompt,
-  buildWarmupSessionInstructions,
+  buildCombinedIntroPrompt,
+  buildWarmupReactionPrompt,
+  buildWarmupReactionWithVideoCuePrompt,
   buildWheelSmallTalkPrompt,
 } from "./realtime.prompts.js";
 

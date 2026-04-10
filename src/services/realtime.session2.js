@@ -147,14 +147,26 @@ export async function playExplanationCue({
     : `Правильна відповідь: ${evaluation.correct_answer_reveal}.`;
   const text = (evaluation.explanation || fallback).trim();
 
-  // No setMonologueMode call — session is already in monologue mode from segue cue
+  // Re-anchor persona before explanation. After several prior responses in this session
+  // (listening cue, segue cue), the model can drift into assistant mode without an
+  // explicit monologue + persona reset. This also prevents "Okay, I'm here to help you"
+  // style openings seen when the model breaks character on long sessions.
+  await session.setMonologueMode({
+    tools: [],
+    instructions: buildModeratorBaseInstructions(systemPrompt),
+  });
+
   const created = await session.createResponse({
-    instructions: `ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
+    instructions: `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
+ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПОЯСНЕННЯ — без жодного вступного слова.
+ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Okay», «Sure», «Звісно» або будь-яка інша вступна фраза.
 
 Прочитай РІВНО ЦЕ:
 «${text}»
 
-Не додавай нічого від себе. Не змінюй жодного слова. Не починай наступний раунд.`,
+Після останнього слова — тиша. Нічого більше.`,
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "explanation_cue" },
