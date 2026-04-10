@@ -12,6 +12,7 @@ export {
 
 export {
   continueWheelDialogue,
+  finishVideoQuestionFlow,
   runSessionOneFlow,
   startWheelDialogue,
 } from "./realtime.session1.js";

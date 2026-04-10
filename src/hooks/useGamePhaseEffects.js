@@ -4,6 +4,7 @@ import {
   RealtimeSession,
   startWheelDialogue,
   runSessionOneFlow,
+  finishVideoQuestionFlow,
 } from "../services/realtime";
 import {
   playListeningCue,
@@ -22,6 +23,42 @@ import { GAME_LANGUAGE, REALTIME_VOICE } from "../config.js";
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 
+function isVideoQuestion(question) {
+  return question?.presentation_mode === "video" && !!question?.video_src;
+}
+
+function buildVideoFullIntroFallbackText(question, sectorNumber, lang) {
+  const isRu = lang === "ru";
+  const character = question?.character || "";
+  const sector = sectorNumber ?? 1;
+  const pos = question?.blitz_position || 1;
+
+  // Blitz Q2/Q3: sector+character already announced for Q1 — skip intro
+  if (question?.round_type === "blitz" && pos > 1) {
+    const posLabel = isRu
+      ? ["Первый", "Второй", "Третий"][pos - 1] || `${pos}-й`
+      : ["Перше", "Друге", "Третє"][pos - 1] || `${pos}-е`;
+    return isRu
+      ? `Внимание на экран. ${posLabel} вопрос.`
+      : `Увага на екран. ${posLabel} питання.`;
+  }
+
+  return isRu
+    ? `Сектор ${sector}. Вопрос от ${character}. А теперь — внимание на экран.`
+    : `Сектор ${sector}. Питання від ${character}. А тепер — увага на екран.`;
+}
+
+function buildVideoTimeCueFallbackText(question, lang) {
+  const isRu = lang === "ru";
+  return question?.round_type === "blitz"
+    ? isRu
+      ? "Время! Двадцать секунд!"
+      : "Час! Двадцять секунд!"
+    : isRu
+    ? "Время! Минута обсуждения!"
+    : "Час! Хвилина обговорення!";
+}
+
 /**
  * Builds the full spoken explanation text from hard-coded material — no AI generation.
  * Structure: hint_for_evaluator (verbatim) → verdict sentence → score sentence.
@@ -33,8 +70,12 @@ function buildSpeechText(q, evaluation, score, blitzQueue, lang) {
   const isBlitzIntermediate = evaluation.blitz_intermediate;
 
   const verdictLine = correct
-    ? (isUk ? "І ваша відповідь правильна." : "И ваш ответ правильный.")
-    : (isUk ? "На жаль, знавці помилилися." : "К сожалению, знатоки ошиблись.");
+    ? isUk
+      ? "І ваша відповідь правильна."
+      : "И ваш ответ правильный."
+    : isUk
+    ? "На жаль, знавці помилилися."
+    : "К сожалению, знатоки ошиблись.";
 
   let scoreLine;
   if (isBlitzIntermediate) {
@@ -50,14 +91,6 @@ function buildSpeechText(q, evaluation, score, blitzQueue, lang) {
   return [hint, verdictLine, scoreLine].filter(Boolean).join(" ");
 }
 
-/**
- * Drives all game-phase side-effects (SPINNING → READING → LISTENING →
- * EVALUATING → SCORING).  Also owns the recording state and the ttsPlaying
- * indicator used by the ModeratorVoice component.
- *
- * Returns isRecording / setIsRecording so that useRecording can wire up
- * the stop-recording action, and ttsPlaying for the UI indicator.
- */
 export function useGamePhaseEffects({
   gameState,
   send,
@@ -76,9 +109,10 @@ export function useGamePhaseEffects({
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
   const recorderRef = useRef(null);
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
+  const awaitingVideoEndRef = useRef(false);
+  const videoFinishInFlightRef = useRef(false);
 
   async function tts(text) {
     setTtsPlaying(true);
@@ -108,6 +142,9 @@ export function useGamePhaseEffects({
             round_type: currentQuestion.round_type,
             blitz_position: currentQuestion.blitz_position,
             blitz_group: currentQuestion.blitz_group,
+            presentation_mode: currentQuestion.presentation_mode,
+            video_src: currentQuestion.video_src,
+            video_poster: currentQuestion.video_poster,
           }
         : null,
       sector_number: (selectedSector ?? 0) + 1,
@@ -117,7 +154,37 @@ export function useGamePhaseEffects({
     };
   }
 
-  // ── SPINNING: open one live bidirectional session for wheel small-talk ───
+  async function handleQuestionVideoEnded() {
+    if (gameState !== STATES.READING) return;
+    if (!isVideoQuestion(currentQuestion)) return;
+    if (!awaitingVideoEndRef.current) return;
+    if (videoFinishInFlightRef.current) return;
+
+    videoFinishInFlightRef.current = true;
+    setVideoReady(false); // hide backdrop before speaking — video gone first, then cue
+    await new Promise((r) => setTimeout(r, 350)); // brief pause to let backdrop exit
+
+    try {
+      if (!USE_MOCK && preSessionRef.current && systemPromptRef.current) {
+        await finishVideoQuestionFlow({
+          session: preSessionRef.current,
+          systemPrompt: systemPromptRef.current,
+          gameContext: buildCtx(),
+        });
+      } else {
+        await tts(
+          buildVideoTimeCueFallbackText(currentQuestion, GAME_LANGUAGE)
+        );
+      }
+    } catch (err) {
+      console.error("[Video question finish failed]", err);
+    } finally {
+      awaitingVideoEndRef.current = false;
+      videoFinishInFlightRef.current = false;
+      closePreSession();
+      send(EVENTS.READING_DONE);
+    }
+  }
 
   useEffect(() => {
     if (gameState !== STATES.SPINNING || USE_MOCK) return;
@@ -136,9 +203,11 @@ export function useGamePhaseEffects({
         session.onError = (err) =>
           console.error("[Moderator session error]", err.message);
         session.onTriggerPhrase = () => {
-          session.setMonologueMode({ tools: [] }).catch((err) =>
-            console.error("[Trigger phrase safety switch failed]", err)
-          );
+          session
+            .setMonologueMode({ tools: [] })
+            .catch((err) =>
+              console.error("[Trigger phrase safety switch failed]", err)
+            );
         };
 
         await session.open({
@@ -173,16 +242,20 @@ export function useGamePhaseEffects({
     };
   }, [gameState, roundNumber, score.experts, score.viewers]);
 
-  // ── READING: fresh protected Session 1, or TTS fallback in mock mode ─────
-
   useEffect(() => {
-    if (gameState !== STATES.READING || !currentQuestion) return;
+    if (gameState !== STATES.READING || !currentQuestion) {
+      awaitingVideoEndRef.current = false;
+      videoFinishInFlightRef.current = false;
+      setVideoReady(false);
+      return;
+    }
 
     console.log("[App][READING effect]", {
       selectedSector,
       hasQuestion: !!currentQuestion,
       currentQuestionId: currentQuestion?.id,
       hasPreSession: !!preSessionRef.current,
+      videoMode: isVideoQuestion(currentQuestion),
     });
 
     if (!USE_MOCK) {
@@ -210,16 +283,20 @@ export function useGamePhaseEffects({
           let attempt = 0;
           let completed = false;
           let lastErr = null;
+          let waitingForVideoEnd = false;
 
           while (!completed && attempt < 2 && !cancelled) {
             attempt += 1;
             let session = null;
+            let keepSessionOpen = false;
+
             try {
               session = await openFreshReadSession();
               if (cancelled) {
                 session.close();
                 return;
               }
+
               preSessionRef.current = session;
               console.log("[App][Session1 start]", {
                 sector: (selectedSector ?? 0) + 1,
@@ -227,25 +304,39 @@ export function useGamePhaseEffects({
                 freshReadSession: true,
                 attempt,
               });
-              await runSessionOneFlow({
+
+              const result = await runSessionOneFlow({
                 session,
                 systemPrompt: systemPromptRef.current,
                 gameContext: buildCtx(),
                 warmupTimeoutMs: 6000,
               });
+
+              waitingForVideoEnd = !!result?.awaitVideoEnd;
+              keepSessionOpen = waitingForVideoEnd;
               completed = true;
             } catch (e) {
               lastErr = e;
               console.error("[Session 1 flow failed]", { attempt, error: e });
             } finally {
-              if (session) session.close();
-              if (preSessionRef.current === session)
+              if (!keepSessionOpen && session) session.close();
+              if (!keepSessionOpen && preSessionRef.current === session) {
                 preSessionRef.current = null;
+              }
             }
           }
 
           if (!completed) {
-            throw lastErr || new Error("Session 1 read did not complete cleanly");
+            throw (
+              lastErr || new Error("Session 1 read did not complete cleanly")
+            );
+          }
+
+          if (waitingForVideoEnd) {
+            awaitingVideoEndRef.current = true;
+            setVideoReady(true);
+            console.log("[App][Session1 waiting for video end]");
+            return;
           }
 
           console.log("[App][Session1 done]");
@@ -258,14 +349,30 @@ export function useGamePhaseEffects({
 
       return () => {
         cancelled = true;
-        closePreSession();
+        if (!awaitingVideoEndRef.current) {
+          closePreSession();
+        }
       };
     }
 
-    // Mock / TTS fallback
     let cancelled = false;
     (async () => {
       try {
+        if (isVideoQuestion(currentQuestion)) {
+          await tts(
+            buildVideoFullIntroFallbackText(
+              currentQuestion,
+              (selectedSector ?? 0) + 1,
+              GAME_LANGUAGE
+            )
+          );
+          if (!cancelled) {
+            awaitingVideoEndRef.current = true;
+            setVideoReady(true);
+          }
+          return;
+        }
+
         const { text, responseId } = await readQuestion(
           buildCtx(),
           state.lastResponseId
@@ -276,15 +383,15 @@ export function useGamePhaseEffects({
       } catch (e) {
         console.error(e);
       } finally {
-        if (!cancelled) send(EVENTS.READING_DONE);
+        if (!cancelled && !isVideoQuestion(currentQuestion)) {
+          send(EVENTS.READING_DONE);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [gameState, currentQuestion]);
-
-  // ── LISTENING: short protected cue → start recording ────────────────────
 
   useEffect(() => {
     if (gameState !== STATES.LISTENING) {
@@ -341,7 +448,6 @@ export function useGamePhaseEffects({
       };
     }
 
-    // Mock mode
     (async () => {
       try {
         await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
@@ -353,8 +459,6 @@ export function useGamePhaseEffects({
       }
     })();
   }, [gameState]);
-
-  // ── EVALUATING: text-only evaluator ──────────────────────────────────────
 
   useEffect(() => {
     if (gameState !== STATES.EVALUATING) return;
@@ -375,10 +479,22 @@ export function useGamePhaseEffects({
           if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
 
           const correct = result.correct ?? false;
-          const correctAnswerReveal = result.correct_answer_reveal ?? currentQuestion?.answer ?? "?";
-          const isBlitzIntermediate = (blitzQueue?.length ?? 0) > 0 && correct === true;
-          const partialEval = { correct, blitz_intermediate: isBlitzIntermediate, correct_answer_reveal: correctAnswerReveal };
-          const explanation = buildSpeechText(currentQuestion, partialEval, score, blitzQueue, GAME_LANGUAGE);
+          const correctAnswerReveal =
+            result.correct_answer_reveal ?? currentQuestion?.answer ?? "?";
+          const isBlitzIntermediate =
+            (blitzQueue?.length ?? 0) > 0 && correct === true;
+          const partialEval = {
+            correct,
+            blitz_intermediate: isBlitzIntermediate,
+            correct_answer_reveal: correctAnswerReveal,
+          };
+          const explanation = buildSpeechText(
+            currentQuestion,
+            partialEval,
+            score,
+            blitzQueue,
+            GAME_LANGUAGE
+          );
           send(EVENTS.EVALUATION_DONE, {
             correct,
             who_scores: correct ? "experts" : "viewers",
@@ -389,13 +505,23 @@ export function useGamePhaseEffects({
         } catch (err) {
           console.error("[Evaluation failed]", err);
           if (!cancelled) {
-            const fallbackEval = { correct: false, blitz_intermediate: false, correct_answer_reveal: currentQuestion?.answer || "?" };
+            const fallbackEval = {
+              correct: false,
+              blitz_intermediate: false,
+              correct_answer_reveal: currentQuestion?.answer || "?",
+            };
             send(EVENTS.EVALUATION_DONE, {
               correct: false,
               who_scores: "viewers",
               correct_answer_reveal: currentQuestion?.answer || "?",
               blitz_intermediate: false,
-              explanation: buildSpeechText(currentQuestion, fallbackEval, score, blitzQueue, GAME_LANGUAGE),
+              explanation: buildSpeechText(
+                currentQuestion,
+                fallbackEval,
+                score,
+                blitzQueue,
+                GAME_LANGUAGE
+              ),
             });
           }
         }
@@ -406,7 +532,6 @@ export function useGamePhaseEffects({
       };
     }
 
-    // Mock mode
     (async () => {
       try {
         const { evaluation: result, responseId } = await evaluateAnswer(
@@ -415,10 +540,22 @@ export function useGamePhaseEffects({
         );
         if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
         const correct = result.correct ?? false;
-        const correctAnswerReveal = result.correct_answer_reveal ?? currentQuestion?.answer ?? "?";
-        const isBlitzIntermediate = (blitzQueue?.length ?? 0) > 0 && correct === true;
-        const partialEval = { correct, blitz_intermediate: isBlitzIntermediate, correct_answer_reveal: correctAnswerReveal };
-        const explanation = buildSpeechText(currentQuestion, partialEval, score, blitzQueue, GAME_LANGUAGE);
+        const correctAnswerReveal =
+          result.correct_answer_reveal ?? currentQuestion?.answer ?? "?";
+        const isBlitzIntermediate =
+          (blitzQueue?.length ?? 0) > 0 && correct === true;
+        const partialEval = {
+          correct,
+          blitz_intermediate: isBlitzIntermediate,
+          correct_answer_reveal: correctAnswerReveal,
+        };
+        const explanation = buildSpeechText(
+          currentQuestion,
+          partialEval,
+          score,
+          blitzQueue,
+          GAME_LANGUAGE
+        );
         send(EVENTS.EVALUATION_DONE, {
           correct,
           who_scores: correct ? "experts" : "viewers",
@@ -428,19 +565,27 @@ export function useGamePhaseEffects({
         });
       } catch (e) {
         console.error(e);
-        const fallbackEval = { correct: false, blitz_intermediate: false, correct_answer_reveal: currentQuestion?.answer || "?" };
+        const fallbackEval = {
+          correct: false,
+          blitz_intermediate: false,
+          correct_answer_reveal: currentQuestion?.answer || "?",
+        };
         send(EVENTS.EVALUATION_DONE, {
           correct: false,
           who_scores: "viewers",
           correct_answer_reveal: currentQuestion?.answer || "?",
           blitz_intermediate: false,
-          explanation: buildSpeechText(currentQuestion, fallbackEval, score, blitzQueue, GAME_LANGUAGE),
+          explanation: buildSpeechText(
+            currentQuestion,
+            fallbackEval,
+            score,
+            blitzQueue,
+            GAME_LANGUAGE
+          ),
         });
       }
     })();
   }, [gameState]);
-
-  // ── SCORING: neutral segue cue only — session stays open for EXPLAINING ──
 
   useEffect(() => {
     if (gameState !== STATES.SCORING || !evaluation) return;
@@ -466,7 +611,6 @@ export function useGamePhaseEffects({
               session.close();
               return;
             }
-            // Keep session open — EXPLAINING will reuse it
             postSessionRef.current = session;
             await playNeutralSegueCue({
               session,
@@ -474,11 +618,9 @@ export function useGamePhaseEffects({
               gameContext: buildCtx(),
             });
           }
-          // No TTS fallback needed — segue is optional; EXPLAINING will speak the key content
         } catch (e) {
           console.error("[SCORING segue failed]", e);
         } finally {
-          // Do NOT closePostSession() here — session must stay open for EXPLAINING
           if (!cancelled) send(EVENTS.SCORING_DONE);
         }
       })();
@@ -488,11 +630,8 @@ export function useGamePhaseEffects({
       };
     }
 
-    // Mock mode: skip segue cue, just advance immediately
     send(EVENTS.SCORING_DONE);
   }, [gameState, evaluation]);
-
-  // ── EXPLAINING: full narrative — reasoning + answer + verdict + score ─────
 
   useEffect(() => {
     if (gameState !== STATES.EXPLAINING || !evaluation) return;
@@ -512,7 +651,6 @@ export function useGamePhaseEffects({
               gameContext: buildCtx(),
             });
           }
-          // If no session (e.g. API key missing), silently skip audio and advance
         } catch (e) {
           console.error("[EXPLAINING effect]", e);
         } finally {
@@ -527,11 +665,11 @@ export function useGamePhaseEffects({
       };
     }
 
-    // Mock mode: TTS is acceptable here (voice inconsistency only matters in real mode)
     (async () => {
       try {
-        // explanation is pre-built by buildSpeechText in EVALUATING: hint + verdict + score
-        await tts(evaluation.explanation || evaluation.correct_answer_reveal || "");
+        await tts(
+          evaluation.explanation || evaluation.correct_answer_reveal || ""
+        );
       } catch (e) {
         console.error("[EXPLAINING mock]", e);
       } finally {
@@ -540,5 +678,12 @@ export function useGamePhaseEffects({
     })();
   }, [gameState, evaluation]);
 
-  return { isRecording, setIsRecording, ttsPlaying, recorderRef };
+  return {
+    isRecording,
+    setIsRecording,
+    ttsPlaying,
+    recorderRef,
+    handleQuestionVideoEnded,
+    videoReady,
+  };
 }

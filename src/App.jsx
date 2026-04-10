@@ -1,10 +1,11 @@
 import { GameProvider, useGame } from "./game/GameContext";
 import { STATES } from "./game/gameStateMachine";
-import { DISCUSSION_SEC, BLITZ_SEC } from "./config.js";
+import { DISCUSSION_SEC, BLITZ_SEC, GAME_LANGUAGE } from "./config.js";
 import Scoreboard from "./components/Scoreboard";
 import Roulette from "./components/Roulette";
 import Timer from "./components/Timer";
 import QuestionCard from "./components/QuestionCard";
+import QuestionVideoPlayer from "./components/QuestionVideoPlayer";
 import ModeratorVoice from "./components/ModeratorVoice";
 import Controls from "./components/Controls";
 import { useTimer } from "./hooks/useTimer";
@@ -15,7 +16,6 @@ import { useRecording } from "./hooks/useRecording";
 import { useKeyboardControls } from "./hooks/useKeyboardControls";
 import "./styles/game.css";
 
-// ─── State labels shown in the status strip ────────────────────────────────
 const STATE_LABELS = {
   [STATES.IDLE]: null,
   [STATES.SPINNING]: "Крутимо волчок...",
@@ -29,6 +29,10 @@ const STATE_LABELS = {
   [STATES.GAME_OVER]: null,
 };
 
+function isVideoQuestion(question) {
+  return question?.presentation_mode === "video" && !!question?.video_src;
+}
+
 function Game() {
   const { state, send } = useGame();
   const {
@@ -40,10 +44,14 @@ function Game() {
     blitzQueue,
   } = state;
 
-  const timerDuration = currentQuestion?.round_type === "blitz" ? BLITZ_SEC : DISCUSSION_SEC;
+  const timerDuration =
+    currentQuestion?.round_type === "blitz" ? BLITZ_SEC : DISCUSSION_SEC;
 
-  // ── Hooks ────────────────────────────────────────────────────────────────
-  const { timerSec, paused, setPaused } = useTimer(gameState, send, timerDuration);
+  const { timerSec, paused, setPaused } = useTimer(
+    gameState,
+    send,
+    timerDuration
+  );
 
   const {
     preSessionRef,
@@ -56,25 +64,36 @@ function Game() {
   const { selectedSector, handleRouletteTarget, handleRouletteStop } =
     useRoulette(gameState, send, closePreSession);
 
-  const { isRecording, setIsRecording, ttsPlaying, recorderRef } =
-    useGamePhaseEffects({
-      gameState,
-      send,
-      state,
-      currentQuestion,
-      score,
-      roundNumber,
-      evaluation,
-      blitzQueue,
-      selectedSector,
-      preSessionRef,
-      postSessionRef,
-      systemPromptRef,
-      closePreSession,
-      closePostSession,
-    });
+  const {
+    isRecording,
+    setIsRecording,
+    ttsPlaying,
+    recorderRef,
+    handleQuestionVideoEnded,
+    videoReady,
+  } = useGamePhaseEffects({
+    gameState,
+    send,
+    state,
+    currentQuestion,
+    score,
+    roundNumber,
+    evaluation,
+    blitzQueue,
+    selectedSector,
+    preSessionRef,
+    postSessionRef,
+    systemPromptRef,
+    closePreSession,
+    closePostSession,
+  });
 
-  const { doStopRef } = useRecording(isRecording, setIsRecording, recorderRef, send);
+  const { doStopRef } = useRecording(
+    isRecording,
+    setIsRecording,
+    recorderRef,
+    send
+  );
 
   useKeyboardControls({
     gameState,
@@ -87,11 +106,8 @@ function Game() {
     currentQuestion,
   });
 
-  // ── Derived layout flags ──────────────────────────────────────────────────
   const showRoulette =
-    gameState === STATES.IDLE ||
-    gameState === STATES.SPINNING;
-  // READY intentionally excluded — question card with answer result fills the area
+    gameState === STATES.IDLE || gameState === STATES.SPINNING;
 
   const showQuestion = [
     STATES.READING,
@@ -104,16 +120,18 @@ function Game() {
   ].includes(gameState);
 
   const showTimer = gameState === STATES.DISCUSSING;
-  const stateLabel = STATE_LABELS[gameState];
+  const stateLabel = videoReady
+    ? GAME_LANGUAGE === "ru"
+      ? "Смотрите на экран"
+      : "Дивіться на екран"
+    : STATE_LABELS[gameState];
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="app">
       <Scoreboard />
       <div className="gold-line" />
 
       <div className="game-area felt-bg">
-        {/* ── Status strip ── */}
         <div className="status-strip">
           <div className="status-left">
             <ModeratorVoice playing={ttsPlaying} />
@@ -139,7 +157,6 @@ function Game() {
           </div>
         </div>
 
-        {/* ── Roulette area (IDLE / SPINNING / READY) ── */}
         <div
           style={{
             display: showRoulette ? "flex" : "none",
@@ -175,7 +192,6 @@ function Game() {
           />
         </div>
 
-        {/* ── Question screens (READING → SCORING) ── */}
         {showQuestion && (
           <div className="screen-question fade-in">
             <div className="question-layout">
@@ -184,6 +200,7 @@ function Game() {
                 evaluation={gameState === STATES.READY ? evaluation : null}
                 hideText={gameState === STATES.READING}
               />
+
               {showTimer && (
                 <div className="timer-column">
                   <Timer
@@ -200,7 +217,17 @@ function Game() {
           </div>
         )}
 
-        {/* ── Game over ── */}
+        {/* ── Video backdrop — fixed overlay, appears only after moderator intro ── */}
+        {videoReady && (
+          <div className="video-backdrop">
+            <QuestionVideoPlayer
+              key={currentQuestion?.id}
+              question={currentQuestion}
+              onEnded={handleQuestionVideoEnded}
+            />
+          </div>
+        )}
+
         {gameState === STATES.GAME_OVER && (
           <div className="screen-gameover fade-in-scale">
             <div

@@ -212,3 +212,26 @@
   color: var(--accent-gold);
   font-family: monospace;
 }
+
+/* ── Video question backdrop ── */
+.video-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1rem, 3vw, 3rem);
+  animation: backdropDrop 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes backdropDrop {
+  from { transform: translateY(-100%); }
+  to   { transform: translateY(0); }
+}
+
+.video-backdrop .qvideo {
+  animation: fadeInUp 0.4s 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
