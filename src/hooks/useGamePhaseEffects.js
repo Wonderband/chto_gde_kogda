@@ -203,7 +203,6 @@ export function useGamePhaseEffects({
     ) {
       return () => {
         music.pause();
-        music.src = "";
       };
     }
 
@@ -260,7 +259,6 @@ export function useGamePhaseEffects({
     return () => {
       cancelled = true;
       music.pause();
-      music.src = "";
     };
   }, [gameState, roundNumber, score.experts, score.viewers]);
 
@@ -436,7 +434,7 @@ export function useGamePhaseEffects({
               apiKey,
               systemPrompt: systemPromptRef.current,
               voice: REALTIME_VOICE,
-              enableMic: false,
+              enableMic: true, // needed for captain name capture after the cue
             });
             if (cancelled) {
               session.close();

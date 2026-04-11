@@ -1,4 +1,4 @@
-import { buildModeratorBaseInstructions } from "./realtime.prompts.js";
+import { buildModeratorBaseInstructions, buildNameConfirmationPrompt } from "./realtime.prompts.js";
 import { TOKENS } from "../config.js";
 
 function delay(ms) {
@@ -93,6 +93,46 @@ export async function playListeningCue({
     earlyAnswer ? "early answer cue" : "time over cue",
     30000
   );
+  const cueText = session.getResponseTranscript(created.responseId);
+  console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (cue):", cueText || "(no transcript)");
+
+  // ── Name capture mini-dialogue ────────────────────────────────────────────
+  // Captain names who will answer ("Відповідає Наталія").
+  // Moderator echoes the name back in a fixed template ("Слухаємо вас, пані Наталю!").
+  // Recording starts only after this exchange completes (or is skipped on timeout).
+  await session.setDialogueMode({
+    tools: [],
+    instructions: buildModeratorBaseInstructions(systemPrompt),
+    silenceDurationMs: 700,
+    interruptResponse: false,
+    createResponse: false,
+  });
+  session.clearInputBuffer();
+
+  try {
+    await session.waitForUserSpeechStart(6000);
+    await session.waitForUserSpeechStop(10000);
+    await delay(400);
+
+    const transcript = await session.waitForInputTranscript(2000);
+    console.log("[DIALOGUE][Session2] КАПІТАН:", transcript ?? "(не розпізнано)");
+
+    const confirmResponse = await session.createResponse({
+      instructions: buildNameConfirmationPrompt(gameContext, transcript),
+      outputModalities: ["audio"],
+      maxOutputTokens: TOKENS.NAME_CONFIRM,
+    });
+    await waitForCompletedSpokenTurn(session, confirmResponse.responseId, "name confirm", 15000);
+    const confirmText = session.getResponseTranscript(confirmResponse.responseId);
+    console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження):", confirmText || "(no transcript)");
+    console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+  } catch {
+    console.log("[DIALOGUE][Session2] капітан не відповів — підтвердження пропущено");
+  }
+
+  // Disable mic before control returns — recording starts its own getUserMedia stream.
+  await session.setMonologueMode({ tools: [] });
 }
 
 export async function playNeutralSegueCue({
@@ -133,6 +173,8 @@ export async function playNeutralSegueCue({
     "segue cue",
     20000
   );
+  const segueText = session.getResponseTranscript(created.responseId);
+  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (segue):", segueText || "(no transcript)");
 }
 
 export async function playExplanationCue({
@@ -183,6 +225,9 @@ export async function playExplanationCue({
     "explanation cue",
     60000
   );
+  const explanationText = session.getResponseTranscript(created.responseId);
+  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (пояснення):", explanationText || "(no transcript)");
+  console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
 }
 
 export async function evaluateSessionTwo({

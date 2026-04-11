@@ -72,4 +72,5 @@ export const TOKENS = {
   VERDICT_CUE: 320,    // short verdict (legacy, unused)
   SEGUE_CUE: 200,      // "А теперь — к правильному…"    (~3–4 s)
   EXPLANATION_CUE: 1000, // full explanation narrative   (~20–30 s)
+  NAME_CONFIRM: 120,     // "Слухаємо вас, пані Наталю!" (~2 s)
 };

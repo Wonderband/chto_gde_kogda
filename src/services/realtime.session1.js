@@ -148,7 +148,9 @@ export async function startWheelDialogue(session, systemPrompt, gameContext, {
     maxOutputTokens: TOKENS.WHEEL_OPENING,
   });
   await waitForSpokenTurn(session, openingResponse.responseId, "opening");
-  console.log("[Realtime][Spin] opening phrase done");
+  const openingText = session.getResponseTranscript(openingResponse.responseId);
+  console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
+  console.log("[DIALOGUE][Spin] ВЕДУЧИЙ:", openingText || "(no transcript)");
 
   // Discard any audio buffered while the moderator was speaking
   session.clearInputBuffer();
@@ -156,22 +158,29 @@ export async function startWheelDialogue(session, systemPrompt, gameContext, {
   // ── Step 2: wait for player response ──
   try {
     await session.waitForUserSpeechStart(8000);
-    console.log("[Realtime][Spin] player started speaking");
+    console.log("[DIALOGUE][Spin] ГРАВЕЦЬ: (говорить...)");
     await session.waitForUserSpeechStop(20000);
-    console.log("[Realtime][Spin] player finished speaking");
     await delay(500); // let server commit the audio buffer
+
+    // Capture input transcript — non-blocking, 2s timeout.
+    // Injected into the reaction prompt so the model references what was actually said.
+    const transcript = await session.waitForInputTranscript(2000);
+    console.log("[DIALOGUE][Spin] ГРАВЕЦЬ:", transcript ?? "(транскрипт не отримано)");
 
     // ── Step 3: one reaction phrase ──
     const reactionResponse = await session.createResponse({
-      instructions: buildWheelReactionPrompt(gameContext),
+      instructions: buildWheelReactionPrompt(gameContext, transcript),
       outputModalities: ["audio"],
       maxOutputTokens: TOKENS.WHEEL_OPENING,
     });
     await waitForSpokenTurn(session, reactionResponse.responseId, "reaction");
-    console.log("[Realtime][Spin] reaction phrase done");
+    const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+    console.log("[DIALOGUE][Spin] РЕАКЦІЯ: ", reactionText || "(no transcript)");
+    console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
   } catch {
     // Player didn't respond or timed out — skip reaction gracefully
-    console.log("[Realtime][Spin] no player response — reaction skipped");
+    console.log("[DIALOGUE][Spin] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
+    console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
   }
 
   // ── Done: silence. Disable mic and VAD so nothing more is said. ──
@@ -232,6 +241,9 @@ export async function runSessionOneFlow({
     });
     console.log("[Realtime][Session1] combined intro created", { responseId: introResponse.responseId });
     await waitForCompletedSpokenTurn(session, introResponse.responseId, "combined intro");
+    const introText = session.getResponseTranscript(introResponse.responseId);
+    console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+    console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (вступ):", introText || "(no transcript)");
 
     // ── Warmup dialogue — only when intro_flavor exists ───────────────────
     if (hasFlavor) {
@@ -251,26 +263,33 @@ export async function runSessionOneFlow({
       let playerResponded = false;
       try {
         await session.waitForUserSpeechStart(8000);
-        console.log("[Realtime][Session1] warmup player started speaking");
+        console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (говорить...)");
         await session.waitForUserSpeechStop(20000);
-        console.log("[Realtime][Session1] warmup player finished speaking");
         await delay(500);
         playerResponded = true;
+
+        // Capture input transcript — non-blocking, 2s timeout.
+        // Injected into the reaction prompt so the model references what was actually said.
+        const transcript = await session.waitForInputTranscript(2000);
+        console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript ?? "(транскрипт не отримано)");
 
         // Reaction: for video questions, fold "Увага на екран!" into the reaction
         // so no separate video intro response is needed (avoids warmup context bleed).
         const reactionInstructions = isVideo
-          ? buildWarmupReactionWithVideoCuePrompt(gameContext)
-          : buildWarmupReactionPrompt(gameContext);
+          ? buildWarmupReactionWithVideoCuePrompt(gameContext, transcript)
+          : buildWarmupReactionPrompt(gameContext, transcript);
         const reactionResponse = await session.createResponse({
           instructions: reactionInstructions,
           outputModalities: ["audio"],
           maxOutputTokens: TOKENS.WARMUP_REACTION,
         });
         await waitForSpokenTurn(session, reactionResponse.responseId, "warmup reaction");
-        console.log("[Realtime][Session1] warmup reaction done");
+        const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+        console.log("[DIALOGUE][Session1] РЕАКЦІЯ: ", reactionText || "(no transcript)");
+        console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
       } catch {
-        console.log("[Realtime][Session1] warmup no player response — reaction skipped");
+        console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
+        console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
       }
 
       await session.setMonologueMode({ tools: [] });
@@ -319,7 +338,9 @@ export async function runSessionOneFlow({
   });
   console.log("[Realtime][Session1] question read created", { responseId: questionResponse.responseId });
   await waitForCompletedSpokenTurn(session, questionResponse.responseId, "question read");
-  console.log("[Realtime][Session1] question read done", { responseId: questionResponse.responseId });
+  const questionText = session.getResponseTranscript(questionResponse.responseId);
+  console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (питання):", questionText || "(no transcript)");
+  console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
 
   return { awaitVideoEnd: false };
 }
