@@ -390,7 +390,9 @@ export function buildQuestionReadPrompt(gameContext) {
   const questionText = q.question_text || "";
   const attention = attentionLineForQuestion(gameContext);
   const timeLine = timeLineForQuestion(gameContext);
-  return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ЗАЧИТУВАННЯ ПИТАННЯ.
+  return `ПОПЕРЕДНІЙ ДІАЛОГ ЗАВЕРШЕНО. Ти більше НЕ в розмові з гравцем — будь-який попередній обмін репліками не має значення і НЕ повинен впливати на наступну репліку.
+
+ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ЗАЧИТУВАННЯ ПИТАННЯ З КОНВЕРТА.
 
 Виконай суворо у такому порядку:
 1. Скажи рівно: «${attention}»
@@ -398,7 +400,7 @@ export function buildQuestionReadPrompt(gameContext) {
 3. Скажи рівно: «${timeLine}»
 4. Одразу замовкни.
 
-Не додавай прелюдію. Не переказуй питання. Нічого не додавай після «${timeLine}».
+ЗАБОРОНЕНО: продовжувати попередню розмову; реагувати на те, що сказав гравець; давати поради чи коментарі; додавати будь-що крім зазначеного тексту.
 `;
 }
 

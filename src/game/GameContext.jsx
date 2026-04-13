@@ -12,6 +12,7 @@ const initialState = {
   roundNumber: 0,
   transcript: "",
   evaluation: null,
+  retryCount: 0,
   isRecording: false,
   ttsPlaying: false,
   earlyAnswer: false,
@@ -63,6 +64,7 @@ function reducer(state, action) {
           roundNumber: state.roundNumber + 1,
           transcript: "",
           evaluation: null,
+          retryCount: 0,
           earlyAnswer: false,
         };
       }
@@ -77,6 +79,7 @@ function reducer(state, action) {
         roundNumber: state.roundNumber + 1,
         transcript: "",
         evaluation: null,
+        retryCount: 0,
         earlyAnswer: false,
       };
     }
@@ -109,6 +112,14 @@ function reducer(state, action) {
     case "SET_TTS_PLAYING":
       return { ...state, ttsPlaying: action.payload };
 
+    case EVENTS.CLARIFICATION_NEEDED:
+      return {
+        ...state,
+        gameState: STATES.LISTENING,
+        transcript: "",
+        retryCount: state.retryCount + 1,
+      };
+
     case EVENTS.EVALUATION_DONE:
       return {
         ...state,
@@ -137,6 +148,7 @@ function reducer(state, action) {
           blitzQueue: blitzRemaining,
           transcript: "",
           evaluation: null,
+          retryCount: 0,
           earlyAnswer: false,
         };
       }
