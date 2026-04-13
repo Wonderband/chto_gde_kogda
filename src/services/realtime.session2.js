@@ -250,6 +250,10 @@ export async function evaluateSessionTwo({
   // Return only the judgment — explanation is built by the caller (useGamePhaseEffects.buildSpeechText)
   return {
     responseId,
-    evaluation: { correct, correct_answer_reveal: correctAnswerReveal },
+    evaluation: {
+      correct,
+      correct_answer_reveal: correctAnswerReveal,
+      no_answer: evaluation?.no_answer ?? false,
+    },
   };
 }

@@ -151,6 +151,7 @@ export function useGamePhaseEffects({
       sector_number: (selectedSector ?? 0) + 1,
       blitz_queue_remaining: blitzQueue?.length ?? 0,
       game_language: GAME_LANGUAGE,
+      retry_attempt: state.retryCount ?? 0,
       ...extra,
     };
   }
@@ -425,30 +426,32 @@ export function useGamePhaseEffects({
 
       (async () => {
         try {
-          if (apiKey && systemPromptRef.current) {
-            closePostSession();
-            const session = new RealtimeSession();
-            session.onError = (err) =>
-              console.error("[Session2 cue error]", err.message);
-            await session.open({
-              apiKey,
-              systemPrompt: systemPromptRef.current,
-              voice: REALTIME_VOICE,
-              enableMic: true, // needed for captain name capture after the cue
-            });
-            if (cancelled) {
-              session.close();
-              return;
+          if (state.retryCount === 0) {
+            if (apiKey && systemPromptRef.current) {
+              closePostSession();
+              const session = new RealtimeSession();
+              session.onError = (err) =>
+                console.error("[Session2 cue error]", err.message);
+              await session.open({
+                apiKey,
+                systemPrompt: systemPromptRef.current,
+                voice: REALTIME_VOICE,
+                enableMic: true, // needed for captain name capture after the cue
+              });
+              if (cancelled) {
+                session.close();
+                return;
+              }
+              postSessionRef.current = session;
+              await playListeningCue({
+                session,
+                systemPrompt: systemPromptRef.current,
+                gameContext: buildCtx(),
+                earlyAnswer: state.earlyAnswer,
+              });
+            } else {
+              await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
             }
-            postSessionRef.current = session;
-            await playListeningCue({
-              session,
-              systemPrompt: systemPromptRef.current,
-              gameContext: buildCtx(),
-              earlyAnswer: state.earlyAnswer,
-            });
-          } else {
-            await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
           }
 
           if (cancelled) return;
@@ -470,7 +473,9 @@ export function useGamePhaseEffects({
 
     (async () => {
       try {
-        await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
+        if (state.retryCount === 0) {
+          await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
+        }
         setIsRecording(true);
         recorderRef.current = await startRecording();
       } catch (e) {
@@ -497,6 +502,17 @@ export function useGamePhaseEffects({
 
           if (cancelled) return;
           if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
+
+          // Clarification retry: if evaluator says transcript is unintelligible and
+          // this is the first attempt, play an apology and go back to LISTENING.
+          if (result.no_answer && state.retryCount === 0) {
+            const apology = GAME_LANGUAGE === "ru"
+              ? "Не расслышал ответ. Пожалуйста, повторите громче."
+              : "Не розібрав відповідь. Будь ласка, повторіть голосніше.";
+            await speak(apology, { voice: "echo" });
+            if (!cancelled) send(EVENTS.CLARIFICATION_NEEDED);
+            return;
+          }
 
           const correct = result.correct ?? false;
           const correctAnswerReveal =
@@ -670,6 +686,10 @@ export function useGamePhaseEffects({
               evaluation,
               gameContext: buildCtx(),
             });
+          } else if (evaluation?.explanation) {
+            // Realtime session didn't open (e.g. 504 from OpenAI) — fall back to TTS
+            console.warn("[EXPLAINING] Realtime session unavailable, falling back to TTS");
+            await speak(evaluation.explanation);
           }
         } catch (e) {
           console.error("[EXPLAINING effect]", e);

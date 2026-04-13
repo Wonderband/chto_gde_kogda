@@ -10,6 +10,7 @@ import {
   withTimeout,
 } from "./realtime.shared.js";
 import { buildModeratorBaseInstructions } from "./realtime.prompts.js";
+import { GAME_LANGUAGE } from "../config.js";
 
 const DEBUG_REALTIME =
   typeof import.meta !== "undefined" &&
@@ -288,7 +289,8 @@ export class RealtimeSession {
       turn_detection,
       // Enable server-side input transcription so we can capture what the player
       // said and inject it into the reaction prompt for context-aware responses.
-      input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
+      // Lock to game language so the model doesn't drift to Turkish/other Cyrillic-adjacent languages.
+      input_audio_transcription: { model: "gpt-4o-mini-transcribe", language: GAME_LANGUAGE === "ru" ? "ru" : "uk" },
     };
     if (instructions != null) patch.instructions = instructions;
     await this.updateSession(patch);

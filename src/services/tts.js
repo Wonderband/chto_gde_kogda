@@ -7,7 +7,7 @@ const API_URL = 'https://api.openai.com/v1/audio/speech'
 
 let currentAudio = null
 
-export async function speak(text, { onStart, onEnd } = {}) {
+export async function speak(text, { onStart, onEnd, voice } = {}) {
   if (USE_MOCK) return mockSpeak(text, { onStart, onEnd })
 
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY
@@ -21,7 +21,7 @@ export async function speak(text, { onStart, onEnd } = {}) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ model: TTS_MODEL, voice: TTS_VOICE, input: text }),
+    body: JSON.stringify({ model: TTS_MODEL, voice: voice ?? TTS_VOICE, input: text }),
   })
 
   if (!response.ok) {
