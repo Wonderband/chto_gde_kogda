@@ -252,15 +252,28 @@ export function buildCombinedIntroPrompt(gameContext) {
   const q = gameContext.current_question || {};
   const isRu = (gameContext.game_language || "uk") !== "uk";
   const flavor = q.intro_flavor || "";
+  const isBlackBox = q.round_type === "black_box";
+  const blackBoxCue = isRu ? "Внимание, чёрный ящик!" : "Увага, чорний ящик!";
 
-  const steps = flavor
-    ? `1. Оголоси сектор номер ${gameContext.sector_number}.
+  let steps;
+  if (isBlackBox) {
+    // Black box intro: sector → character → "Увага, чорний ящик!"
+    // The intro_flavor (warmup question) is intentionally NOT read here —
+    // it will be asked by the moderator AFTER the black_box music plays.
+    steps = `1. Оголоси сектор номер ${gameContext.sector_number}.
+2. Представ автора питання: ${q.character || "Невідомий персонаж"}.
+3. Скажи рівно: «${blackBoxCue}»
+4. Одразу замовкни.`;
+  } else {
+    steps = flavor
+      ? `1. Оголоси сектор номер ${gameContext.sector_number}.
 2. Представ автора питання: ${q.character || "Невідомий персонаж"}.
 3. Зачитай ДОСЛІВНО: «${flavor}»
 4. Одразу замовкни.`
-    : `1. Оголоси сектор номер ${gameContext.sector_number}.
+      : `1. Оголоси сектор номер ${gameContext.sector_number}.
 2. Представ автора питання: ${q.character || "Невідомий персонаж"}.
 3. Одразу замовкни.`;
+  }
 
   return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО РАУНДУ.
 
@@ -401,6 +414,66 @@ export function buildQuestionReadPrompt(gameContext) {
 4. Одразу замовкни.
 
 ЗАБОРОНЕНО: продовжувати попередню розмову; реагувати на те, що сказав гравець; давати поради чи коментарі; додавати будь-що крім зазначеного тексту.
+`;
+}
+
+/**
+ * Attention-only cue — first half of the split question read.
+ * Says only the attention line (e.g. "Увага! Питання!") then goes silent.
+ * App plays gong after this completes, then sends buildQuestionBodyPrompt.
+ */
+/**
+ * Black box warmup opening — spoken AFTER black_box.mp3 finishes.
+ * Reads intro_flavor verbatim as a live question to players, then goes silent
+ * and waits for a response. Reaction is handled by buildWarmupReactionWithVideoCuePrompt.
+ */
+export function buildBlackBoxWarmupOpeningPrompt(gameContext) {
+  const q = gameContext.current_question || {};
+  const isRu = (gameContext.game_language || "uk") !== "uk";
+  const flavor = q.intro_flavor || (isRu ? "Итак, что думаете?" : "Отже, що думаєте?");
+
+  return `ПОТОЧНА ФАЗА: ЖИВИЙ ДІАЛОГ З ГРАВЦЯМИ ПІСЛЯ ЧОРНОГО ЯЩИКА.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПИТАННЯ.
+ЗАБОРОНЕНО: будь-яка вступна фраза перед питанням.
+
+Зачитай ДОСЛІВНО: «${flavor}»
+
+Одразу замовкни і чекай відповіді гравця. Нічого не додавай.
+Мова: ${isRu ? "російська" : "українська"}.
+`;
+}
+
+export function buildAttentionCuePrompt(gameContext) {
+  const attention = attentionLineForQuestion(gameContext);
+  return `ПОТОЧНА ФАЗА: ОДНА РЕПЛІКА — УВАГА.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ОГОЛОШЕННЯ.
+ЗАБОРОНЕНО: будь-яка вступна або підтверджувальна фраза.
+
+Скажи РІВНО: «${attention}»
+
+Одразу замовкни. Нічого не кажи після цієї фрази.
+`;
+}
+
+/**
+ * Question body — second half of the split question read (after gong).
+ * Reads question verbatim + time line, then silence.
+ */
+export function buildQuestionBodyPrompt(gameContext) {
+  const q = gameContext.current_question || {};
+  const questionText = q.question_text || "";
+  const timeLine = timeLineForQuestion(gameContext);
+  return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ЗАЧИТУВАННЯ ТЕКСТУ ПИТАННЯ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПИТАННЯ — без жодного вступного слова.
+ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Отже», «Слухайте» або будь-яка вступна фраза.
+
+Виконай суворо у такому порядку:
+1. Зачитай питання ДОСЛІВНО: «${questionText}»
+2. Скажи рівно: «${timeLine}»
+3. Одразу замовкни.
 `;
 }
 

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { GameProvider, useGame } from "./game/GameContext";
 import { STATES } from "./game/gameStateMachine";
 import { DISCUSSION_SEC, BLITZ_SEC, GAME_LANGUAGE } from "./config.js";
@@ -18,6 +19,7 @@ import "./styles/game.css";
 
 const STATE_LABELS = {
   [STATES.IDLE]: null,
+  [STATES.ANNOUNCING]: "Починаємо раунд...",
   [STATES.SPINNING]: "Крутимо волчок...",
   [STATES.READING]: "Ведучий читає питання",
   [STATES.DISCUSSING]: "Хвилина обговорення!",
@@ -110,7 +112,9 @@ function Game() {
   });
 
   const showRoulette =
-    gameState === STATES.IDLE || gameState === STATES.SPINNING;
+    gameState === STATES.IDLE ||
+    gameState === STATES.ANNOUNCING ||
+    gameState === STATES.SPINNING;
 
   const showQuestion = [
     STATES.READING,
@@ -176,6 +180,11 @@ function Game() {
               <div className="idle-hint-key">
                 Натисніть <kbd>Пробіл</kbd> щоб почати
               </div>
+            </div>
+          )}
+          {gameState === STATES.ANNOUNCING && (
+            <div className="spin-label fade-in">
+              {GAME_LANGUAGE === "ru" ? "Починаємо раунд..." : "Починаємо раунд..."}
             </div>
           )}
           {gameState === STATES.SPINNING && (
@@ -262,9 +271,29 @@ function Game() {
 }
 
 export default function App() {
+  const [introPlaying, setIntroPlaying] = useState(true);
+
   return (
-    <GameProvider>
-      <Game />
-    </GameProvider>
+    <>
+      {introPlaying && (
+        <video
+          src="/sounds/intro.mp4"
+          autoPlay
+          onEnded={() => setIntroPlaying(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            zIndex: 999,
+            background: "#000",
+          }}
+        />
+      )}
+      <GameProvider>
+        <Game />
+      </GameProvider>
+    </>
   );
 }
