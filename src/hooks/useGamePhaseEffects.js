@@ -104,6 +104,7 @@ export function useGamePhaseEffects({
   preSessionRef,
   postSessionRef,
   systemPromptRef,
+  playersRef,
   closePreSession,
   closePostSession,
 }) {
@@ -187,10 +188,25 @@ export function useGamePhaseEffects({
   }
 
   useEffect(() => {
-    if (gameState !== STATES.SPINNING || USE_MOCK) return;
+    if (gameState !== STATES.SPINNING) return;
 
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    if (!apiKey || !systemPromptRef.current) return;
+    // Background music — plays even in mock mode; silently skipped if file absent
+    const music = new Audio("/sounds/wheel-music.mp3");
+    music.loop = true;
+    music.volume = 0.35;
+    music.play().catch(() => {});
+
+    if (
+      USE_MOCK ||
+      !import.meta.env.VITE_OPENAI_API_KEY ||
+      !systemPromptRef.current
+    ) {
+      return () => {
+        music.pause();
+      };
+    }
+
+    const WHEEL_DELAY_MS = 4000;
 
     let cancelled = false;
 
@@ -202,16 +218,11 @@ export function useGamePhaseEffects({
         const session = new RealtimeSession();
         session.onError = (err) =>
           console.error("[Moderator session error]", err.message);
-        session.onTriggerPhrase = () => {
-          session
-            .setMonologueMode({ tools: [] })
-            .catch((err) =>
-              console.error("[Trigger phrase safety switch failed]", err)
-            );
-        };
+        // NOTE: onTriggerPhrase intentionally NOT set here — trigger phrases
+        // like "увага питання" must not interrupt the spinning dialogue.
 
         await session.open({
-          apiKey,
+          apiKey: import.meta.env.VITE_OPENAI_API_KEY,
           systemPrompt: systemPromptRef.current,
           voice: REALTIME_VOICE,
           enableMic: true,
@@ -225,12 +236,20 @@ export function useGamePhaseEffects({
         preSessionRef.current = session;
         console.log("[App][Spin session ready]");
 
-        await startWheelDialogue(session, systemPromptRef.current, {
-          round_number: roundNumber + 1,
-          score,
-          game_language: GAME_LANGUAGE,
-        });
-        console.log("[App][Spin first line requested]");
+        await startWheelDialogue(
+          session,
+          systemPromptRef.current,
+          {
+            round_number: roundNumber + 1,
+            score,
+            game_language: GAME_LANGUAGE,
+            players: playersRef?.current || [],
+          },
+          { delayMs: WHEEL_DELAY_MS }
+        );
+
+        if (cancelled) return;
+        console.log("[App][Spin dialogue started]");
       } catch (err) {
         console.error("[Spin session open failed]", err);
         closePreSession();
@@ -239,6 +258,7 @@ export function useGamePhaseEffects({
 
     return () => {
       cancelled = true;
+      music.pause();
     };
   }, [gameState, roundNumber, score.experts, score.viewers]);
 
@@ -273,7 +293,7 @@ export function useGamePhaseEffects({
             apiKey,
             systemPrompt: systemPromptRef.current,
             voice: REALTIME_VOICE,
-            enableMic: false,
+            enableMic: true,
           });
           return readSession;
         };
@@ -414,7 +434,7 @@ export function useGamePhaseEffects({
               apiKey,
               systemPrompt: systemPromptRef.current,
               voice: REALTIME_VOICE,
-              enableMic: false,
+              enableMic: true, // needed for captain name capture after the cue
             });
             if (cancelled) {
               session.close();

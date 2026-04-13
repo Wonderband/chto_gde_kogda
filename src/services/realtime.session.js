@@ -49,6 +49,10 @@ export class RealtimeSession {
     this._lastAssistantStartAt = 0;
     this._lastUserStartAt = 0;
 
+    // Input transcription — populated when input_audio_transcription is enabled
+    this._inputTranscriptWaiters = [];
+    this._pendingInputTranscript = null;
+
     this.onError = null;
     this.onSessionUpdated = null;
     this.onResponseCreated = null;
@@ -260,17 +264,31 @@ export class RealtimeSession {
     eagerness = "low",
     interruptResponse = true,
     createResponse = true,
+    silenceDurationMs = null, // if set, uses server_vad instead of semantic_vad
   } = {}) {
     this.setMicEnabled(true);
+    const turn_detection = silenceDurationMs != null
+      ? {
+          type: "server_vad",
+          silence_duration_ms: silenceDurationMs,
+          prefix_padding_ms: 300,
+          threshold: 0.5,
+          create_response: createResponse,
+          interrupt_response: interruptResponse,
+        }
+      : {
+          type: "semantic_vad",
+          eagerness,
+          create_response: createResponse,
+          interrupt_response: interruptResponse,
+        };
     const patch = {
       tools,
       tool_choice: "auto",
-      turn_detection: {
-        type: "semantic_vad",
-        eagerness,
-        create_response: createResponse,
-        interrupt_response: interruptResponse,
-      },
+      turn_detection,
+      // Enable server-side input transcription so we can capture what the player
+      // said and inject it into the reaction prompt for context-aware responses.
+      input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
     };
     if (instructions != null) patch.instructions = instructions;
     await this.updateSession(patch);
@@ -292,6 +310,7 @@ export class RealtimeSession {
     this._send({ type: "input_audio_buffer.clear" });
     this._userSpeaking = false;
     this._lastUserStopAt = Date.now();
+    this._pendingInputTranscript = null; // discard any transcript from previous speech
   }
 
   async waitForIdle({ quietMs = 500, timeoutMs = 5000 } = {}) {
@@ -368,6 +387,32 @@ export class RealtimeSession {
     }
 
     throw new Error(`user speech did not stop within ${timeoutMs} ms`);
+  }
+
+  /**
+   * Returns the transcript of the most recent player speech turn.
+   * Resolves as soon as conversation.item.input_audio_transcription.completed fires,
+   * or returns null if it doesn't arrive within timeoutMs.
+   * Requires input_audio_transcription to be enabled in the session (setDialogueMode does this).
+   */
+  async waitForInputTranscript(timeoutMs = 2500) {
+    if (this._closed) return null;
+    // Transcript already buffered (arrived during delay() or before this call)
+    if (this._pendingInputTranscript != null) {
+      const t = this._pendingInputTranscript;
+      this._pendingInputTranscript = null;
+      return t || null;
+    }
+    const deferred = makeDeferred();
+    this._inputTranscriptWaiters.push(deferred);
+    try {
+      const t = await withTimeout(deferred.promise, timeoutMs, "input transcript");
+      return t || null;
+    } catch {
+      const idx = this._inputTranscriptWaiters.indexOf(deferred);
+      if (idx >= 0) this._inputTranscriptWaiters.splice(idx, 1);
+      return null;
+    }
   }
 
   async waitForAssistantSpeechStop(timeoutMs = 5000) {
@@ -739,6 +784,21 @@ export class RealtimeSession {
           this.onUserSpeechStopped(event);
         }
         break;
+
+      case "conversation.item.input_audio_transcription.completed": {
+        const text = (event.transcript || "").trim();
+        console.log("[Realtime][InputTranscript]", {
+          text: text.slice(0, 100),
+          itemId: event.item_id,
+        });
+        const waiter = this._inputTranscriptWaiters.shift();
+        if (waiter) {
+          waiter.resolve(text);
+        } else {
+          this._pendingInputTranscript = text; // buffered for next waitForInputTranscript
+        }
+        break;
+      }
 
       case "response.created":
         this._lastResponseId = event.response.id;

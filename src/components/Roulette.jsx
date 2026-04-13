@@ -151,8 +151,10 @@ export default function Roulette({
   const [spinDurationMs, setSpinDurationMs] = useState(durationMs);
   const spinTimer = useRef(null);
   const openTimer = useRef(null);
+  const openTimerCommit = useRef(null); // Bug 1 fix: separate ref so cleanup never cancels the commit
   const onStopRef = useRef(onStop);
   const onTargetRef = useRef(onTarget);
+  const stoppedRef = useRef(false); // true after natural stop fires, until spinning resets
 
   useEffect(() => {
     onStopRef.current = onStop;
@@ -164,19 +166,31 @@ export default function Roulette({
 
   useEffect(() => {
     if (selectedSector == null) {
+      clearTimeout(openTimer.current);
+      clearTimeout(openTimerCommit.current);
       setOpenedSectors(new Set());
       setOpeningSector(null);
     }
   }, [selectedSector]);
 
+  // Bug 2 fix: runs before the main spin effect (React processes effects in declaration order).
+  // Guarantees stoppedRef is cleared whenever spinning becomes true, regardless of
+  // whether the previous spinning=false reset was batched away by React 18.
+  useEffect(() => {
+    if (spinning) {
+      stoppedRef.current = false;
+    }
+  }, [spinning]);
+
   useEffect(() => {
     if (!spinning) {
+      stoppedRef.current = false; // secondary reset (keep for clarity)
       console.log("[Roulette][effect idle]", { spinning, isAnimating });
       return () => clearTimeout(spinTimer.current);
     }
 
-    if (isAnimating) {
-      console.log("[Roulette][effect already animating]");
+    if (isAnimating || stoppedRef.current) {
+      console.log("[Roulette][effect already animating or stopped]", { isAnimating, stopped: stoppedRef.current });
       return;
     }
 
@@ -207,6 +221,7 @@ export default function Roulette({
     clearTimeout(spinTimer.current);
     spinTimer.current = setTimeout(() => {
       console.log("[Roulette][timeout fired]", { target, dur });
+      stoppedRef.current = true; // block re-trigger while parent processes async stop
       setIsAnimating(false);
       onStopRef.current?.(target);
     }, dur);
@@ -219,19 +234,25 @@ export default function Roulette({
     };
   }, [spinning, durationMs, isAnimating, openedSectors]);
 
+  // Bug 1 fix: split start and commit timeouts into separate refs.
+  // The start timer (450ms) can be cancelled by cleanup if dependencies change early.
+  // The commit timer (650ms) is NEVER cancelled by cleanup — once fading has started
+  // the sector must be committed to openedSectors, otherwise its envelope re-appears
+  // when openingSector is overwritten by the next round's sector.
   useEffect(() => {
     if (selectedSector != null && !spinning && !isAnimating) {
       console.log("[Roulette][open envelope]", { selectedSector });
       clearTimeout(openTimer.current);
       openTimer.current = setTimeout(() => {
         setOpeningSector(selectedSector);
-        openTimer.current = setTimeout(() => {
+        clearTimeout(openTimerCommit.current);
+        openTimerCommit.current = setTimeout(() => {
           setOpenedSectors((prev) => new Set([...prev, selectedSector]));
-          setOpeningSector(null);
+          setOpeningSector((cur) => cur === selectedSector ? null : cur);
         }, 650);
       }, 450);
     }
-    return () => clearTimeout(openTimer.current);
+    return () => clearTimeout(openTimer.current); // only cancel the start timer
   }, [selectedSector, spinning, isAnimating]);
 
   return (

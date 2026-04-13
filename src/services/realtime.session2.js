@@ -1,4 +1,4 @@
-import { buildModeratorBaseInstructions } from "./realtime.prompts.js";
+import { buildModeratorBaseInstructions, buildNameConfirmationPrompt } from "./realtime.prompts.js";
 import { TOKENS } from "../config.js";
 
 function delay(ms) {
@@ -93,6 +93,46 @@ export async function playListeningCue({
     earlyAnswer ? "early answer cue" : "time over cue",
     30000
   );
+  const cueText = session.getResponseTranscript(created.responseId);
+  console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (cue):", cueText || "(no transcript)");
+
+  // ── Name capture mini-dialogue ────────────────────────────────────────────
+  // Captain names who will answer ("Відповідає Наталія").
+  // Moderator echoes the name back in a fixed template ("Слухаємо вас, пані Наталю!").
+  // Recording starts only after this exchange completes (or is skipped on timeout).
+  await session.setDialogueMode({
+    tools: [],
+    instructions: buildModeratorBaseInstructions(systemPrompt),
+    silenceDurationMs: 700,
+    interruptResponse: false,
+    createResponse: false,
+  });
+  session.clearInputBuffer();
+
+  try {
+    await session.waitForUserSpeechStart(6000);
+    await session.waitForUserSpeechStop(10000);
+    await delay(400);
+
+    const transcript = await session.waitForInputTranscript(2000);
+    console.log("[DIALOGUE][Session2] КАПІТАН:", transcript ?? "(не розпізнано)");
+
+    const confirmResponse = await session.createResponse({
+      instructions: buildNameConfirmationPrompt(gameContext, transcript),
+      outputModalities: ["audio"],
+      maxOutputTokens: TOKENS.NAME_CONFIRM,
+    });
+    await waitForCompletedSpokenTurn(session, confirmResponse.responseId, "name confirm", 15000);
+    const confirmText = session.getResponseTranscript(confirmResponse.responseId);
+    console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження):", confirmText || "(no transcript)");
+    console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+  } catch {
+    console.log("[DIALOGUE][Session2] капітан не відповів — підтвердження пропущено");
+  }
+
+  // Disable mic before control returns — recording starts its own getUserMedia stream.
+  await session.setMonologueMode({ tools: [] });
 }
 
 export async function playNeutralSegueCue({
@@ -133,6 +173,8 @@ export async function playNeutralSegueCue({
     "segue cue",
     20000
   );
+  const segueText = session.getResponseTranscript(created.responseId);
+  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (segue):", segueText || "(no transcript)");
 }
 
 export async function playExplanationCue({
@@ -147,14 +189,26 @@ export async function playExplanationCue({
     : `Правильна відповідь: ${evaluation.correct_answer_reveal}.`;
   const text = (evaluation.explanation || fallback).trim();
 
-  // No setMonologueMode call — session is already in monologue mode from segue cue
+  // Re-anchor persona before explanation. After several prior responses in this session
+  // (listening cue, segue cue), the model can drift into assistant mode without an
+  // explicit monologue + persona reset. This also prevents "Okay, I'm here to help you"
+  // style openings seen when the model breaks character on long sessions.
+  await session.setMonologueMode({
+    tools: [],
+    instructions: buildModeratorBaseInstructions(systemPrompt),
+  });
+
   const created = await session.createResponse({
-    instructions: `ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
+    instructions: `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
+ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПОЯСНЕННЯ — без жодного вступного слова.
+ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Okay», «Sure», «Звісно» або будь-яка інша вступна фраза.
 
 Прочитай РІВНО ЦЕ:
 «${text}»
 
-Не додавай нічого від себе. Не змінюй жодного слова. Не починай наступний раунд.`,
+Після останнього слова — тиша. Нічого більше.`,
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "explanation_cue" },
@@ -171,6 +225,9 @@ export async function playExplanationCue({
     "explanation cue",
     60000
   );
+  const explanationText = session.getResponseTranscript(created.responseId);
+  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (пояснення):", explanationText || "(no transcript)");
+  console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
 }
 
 export async function evaluateSessionTwo({

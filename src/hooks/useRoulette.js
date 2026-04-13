@@ -5,7 +5,7 @@ import { STATES, EVENTS } from "../game/gameStateMachine";
  * Manages the selected-sector state and the two Roulette callbacks.
  * Also keeps a ref in sync so async closures can read the latest value.
  */
-export function useRoulette(gameState, send, closePreSession) {
+export function useRoulette(gameState, send, graceClosePreSession) {
   const [selectedSector, setSelectedSector] = useState(null);
   const selectedSectorRef = useRef(null);
 
@@ -24,13 +24,13 @@ export function useRoulette(gameState, send, closePreSession) {
   }, []);
 
   const handleRouletteStop = useCallback(
-    (sector) => {
+    async (sector) => {
       console.log("[App][Roulette stop]", { sector });
-      closePreSession();
+      await graceClosePreSession();
       setSelectedSector(sector);
       send(EVENTS.SPIN_DONE);
     },
-    [send, closePreSession]
+    [send, graceClosePreSession]
   );
 
   return {
