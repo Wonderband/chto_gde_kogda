@@ -1,5 +1,6 @@
 export const STATES = {
   IDLE: 'IDLE',
+  ANNOUNCING: 'ANNOUNCING', // ← TTS announces round number before wheel spins
   SPINNING: 'SPINNING',
   READING: 'READING',
   DISCUSSING: 'DISCUSSING',
@@ -13,6 +14,7 @@ export const STATES = {
 
 export const EVENTS = {
   START: 'START',
+  ANNOUNCING_DONE: 'ANNOUNCING_DONE', // ← TTS round announcement finished → start spinning
   SPIN_DONE: 'SPIN_DONE',
   READING_DONE: 'READING_DONE',
   EARLY_ANSWER: 'EARLY_ANSWER',
@@ -29,7 +31,10 @@ export const EVENTS = {
 
 const transitions = {
   [STATES.IDLE]: {
-    [EVENTS.START]: STATES.SPINNING,
+    [EVENTS.START]: STATES.ANNOUNCING,
+  },
+  [STATES.ANNOUNCING]: {
+    [EVENTS.ANNOUNCING_DONE]: STATES.SPINNING,
   },
   [STATES.SPINNING]: {
     [EVENTS.SPIN_DONE]: STATES.READING,
@@ -56,7 +61,7 @@ const transitions = {
     [EVENTS.EXPLAINING_DONE]: STATES.READY,   // ← score applied here
   },
   [STATES.READY]: {
-    [EVENTS.NEXT_ROUND]: STATES.SPINNING,  // ← Space triggers this
+    [EVENTS.NEXT_ROUND]: STATES.ANNOUNCING,  // ← Space triggers this → announce round → spin
   },
   [STATES.GAME_OVER]: {
     [EVENTS.RESTART]: STATES.IDLE,

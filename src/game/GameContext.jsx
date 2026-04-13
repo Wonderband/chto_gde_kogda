@@ -31,7 +31,7 @@ function reducer(state, action) {
       const questions = loadQuestions();
       return {
         ...initialState,
-        gameState: STATES.SPINNING,
+        gameState: STATES.ANNOUNCING,
         questions,
       };
     }
@@ -171,6 +171,9 @@ function reducer(state, action) {
     }
 
     case EVENTS.NEXT_ROUND:
+      return { ...state, gameState: STATES.ANNOUNCING };
+
+    case EVENTS.ANNOUNCING_DONE:
       return { ...state, gameState: STATES.SPINNING };
 
     default:

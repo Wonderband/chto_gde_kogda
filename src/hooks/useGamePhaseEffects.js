@@ -20,6 +20,23 @@ import {
   buildListeningScript,
 } from "../services/openai";
 import { GAME_LANGUAGE, REALTIME_VOICE } from "../config.js";
+import { playGong, playBlackBoxMusic, playLooped } from "../utils/sounds.js";
+
+const ORDINALS_UK = [
+  "Перший", "Другий", "Третій", "Четвертий", "П'ятий",
+  "Шостий", "Сьомий", "Восьмий", "Дев'ятий", "Десятий",
+];
+const ORDINALS_RU = [
+  "Первый", "Второй", "Третий", "Четвёртый", "Пятый",
+  "Шестой", "Седьмой", "Восьмой", "Девятый", "Десятый",
+];
+
+function buildRoundAnnouncementText(roundNumber, lang) {
+  const n = roundNumber; // roundNumber is incremented on SPIN_DONE, so here it's the upcoming round
+  const ordinals = lang === "ru" ? ORDINALS_RU : ORDINALS_UK;
+  const ordinal = ordinals[n - 1] || `${n}-й`;
+  return lang === "ru" ? `Раунд ${ordinal}.` : `Раунд ${ordinal}.`;
+}
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 
@@ -187,6 +204,26 @@ export function useGamePhaseEffects({
       send(EVENTS.READING_DONE);
     }
   }
+
+  // ── ANNOUNCING: TTS announces round number, then triggers SPINNING ──────────
+  useEffect(() => {
+    if (gameState !== STATES.ANNOUNCING) return;
+
+    let cancelled = false;
+    const announcementText = buildRoundAnnouncementText(roundNumber + 1, GAME_LANGUAGE);
+
+    (async () => {
+      try {
+        await tts(announcementText);
+      } catch (e) {
+        console.error("[ANNOUNCING] TTS failed", e);
+      } finally {
+        if (!cancelled) send(EVENTS.ANNOUNCING_DONE);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [gameState]);
 
   useEffect(() => {
     if (gameState !== STATES.SPINNING) return;
@@ -379,14 +416,37 @@ export function useGamePhaseEffects({
     let cancelled = false;
     (async () => {
       try {
+        const isBlackBox = currentQuestion?.round_type === "black_box";
+        const sector = (selectedSector ?? 0) + 1;
+        const isRu = GAME_LANGUAGE === "ru";
+
         if (isVideoQuestion(currentQuestion)) {
-          await tts(
-            buildVideoFullIntroFallbackText(
-              currentQuestion,
-              (selectedSector ?? 0) + 1,
-              GAME_LANGUAGE
-            )
-          );
+          if (isBlackBox) {
+            // Black box: intro → "Увага, чорний ящик!" → music → flavor question → gong → "Увага на екран!"
+            const blackBoxCue = isRu ? "Внимание, чёрный ящик!" : "Увага, чорний ящик!";
+            const screenCue = isRu ? "Внимание на экран!" : "Увага на екран!";
+            const character = currentQuestion.character || "";
+            const introLine = isRu
+              ? `Сектор ${sector}. Вопрос от ${character}. ${blackBoxCue}`
+              : `Сектор ${sector}. Питання від ${character}. ${blackBoxCue}`;
+            await tts(introLine);
+            if (!cancelled) await playBlackBoxMusic();
+            // After music: read flavor question aloud (no player response in mock mode)
+            if (!cancelled && currentQuestion.intro_flavor) {
+              await tts(currentQuestion.intro_flavor);
+            }
+            if (!cancelled) await playGong();
+            if (!cancelled) await tts(screenCue);
+          } else {
+            await tts(
+              buildVideoFullIntroFallbackText(
+                currentQuestion,
+                sector,
+                GAME_LANGUAGE
+              )
+            );
+            if (!cancelled) await playGong();
+          }
           if (!cancelled) {
             awaitingVideoEndRef.current = true;
             setVideoReady(true);
@@ -394,13 +454,27 @@ export function useGamePhaseEffects({
           return;
         }
 
+        // Text question: split at attention cue to insert gong
         const { text, responseId } = await readQuestion(
           buildCtx(),
           state.lastResponseId
         );
         if (cancelled) return;
         if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
-        await tts(text);
+
+        const attentionKw = isRu ? "Внимание! Вопрос!" : "Увага! Питання!";
+        const splitIdx = text.indexOf(attentionKw);
+        if (splitIdx !== -1) {
+          const before = text.slice(0, splitIdx + attentionKw.length).trim();
+          const after = text.slice(splitIdx + attentionKw.length).trim();
+          if (before) await tts(before);
+          await playGong();
+          if (after && !cancelled) await tts(after);
+        } else {
+          // Blitz or unrecognised format: gong then full text
+          await playGong();
+          if (!cancelled) await tts(text);
+        }
       } catch (e) {
         console.error(e);
       } finally {
@@ -678,6 +752,7 @@ export function useGamePhaseEffects({
 
       (async () => {
         try {
+          await playGong();
           const session = postSessionRef.current;
           if (session && apiKey) {
             await playExplanationCue({
@@ -707,6 +782,7 @@ export function useGamePhaseEffects({
 
     (async () => {
       try {
+        await playGong();
         await tts(
           evaluation.explanation || evaluation.correct_answer_reveal || ""
         );
@@ -717,6 +793,20 @@ export function useGamePhaseEffects({
       }
     })();
   }, [gameState, evaluation]);
+
+  // ── READY: loop pause music while waiting for next round ────────────────────
+  useEffect(() => {
+    if (gameState !== STATES.READY) return;
+    const { stop } = playLooped("/sounds/pause.mp3", { volume: 0.45 });
+    return stop;
+  }, [gameState]);
+
+  // ── GAME_OVER: loop final music until restart ────────────────────────────────
+  useEffect(() => {
+    if (gameState !== STATES.GAME_OVER) return;
+    const { stop } = playLooped("/sounds/final.mp3", { volume: 0.55 });
+    return stop;
+  }, [gameState]);
 
   return {
     isRecording,
