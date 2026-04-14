@@ -3,7 +3,7 @@
  */
 
 import { mockTranscribeAudio } from "./mock";
-import { TRANSCRIBE_MODEL, GAME_LANGUAGE } from "../config.js";
+import { TRANSCRIBE_MODEL, GAME_LANGUAGE, MIN_RECORDING_BLOB_BYTES } from "../config.js";
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 const API_URL = "https://api.openai.com/v1/audio/transcriptions";
@@ -84,16 +84,13 @@ async function doTranscribe(audioBlob, language, apiKey) {
   return normalizeTranscript(data.text ?? "");
 }
 
-// Blobs smaller than this are almost certainly silence/noise — skip the API call.
-const MIN_BLOB_BYTES = 20_000;
-
 export async function transcribeAudio(audioBlob) {
   if (USE_MOCK) return mockTranscribeAudio(audioBlob);
 
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
   if (!apiKey) throw new Error("VITE_OPENAI_API_KEY not set in .env");
 
-  if (audioBlob.size < MIN_BLOB_BYTES) {
+  if (audioBlob.size < MIN_RECORDING_BLOB_BYTES) {
     console.warn(`[STT] Blob too small (${audioBlob.size} bytes) — skipping transcription`);
     return "";
   }

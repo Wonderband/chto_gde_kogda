@@ -228,10 +228,18 @@ VITE_USE_MOCK=false               # "true" to bypass all API calls (mock mode)
 - Ukrainian as primary language throughout (.env VITE_GAME_LANGUAGE=uk, all defaults)
 - 12 unique Breaking Bad characters; 4 new: Tuco, Gale, Jane, Flynn (placeholder photos)
 - All 14 hint_for_evaluator texts build suspense — answer appears only at end of hint
+- **Intro video** (`intro.mp4`): fullscreen overlay on app load, disappears when video ends
+- **ANNOUNCING state**: TTS round announcement ("Раунд Перший" etc.) before wheel spins — fires on both START and NEXT_ROUND
+- **Gong** (`gong.mp3`): plays after "Увага! Питання!" before question text; plays after segue cue before explanation. Both real and mock modes. Question read split into two Realtime responses (`buildAttentionCuePrompt` + `buildQuestionBodyPrompt`).
+- **Black box flow**: intro → "Увага, чорний ящик!" → black_box.mp3 music → warmup dialogue using intro_flavor → player responds → reaction ends "Увага на екран!" → gong → video
+- **Pause music** (`pause.mp3`): loops in READY state, stops when Space pressed
+- **Final music** (`final.mp3`): loops in GAME_OVER state, stops when R pressed
+- All sound files use `src/utils/sounds.js`: `playSound`, `playLooped`, `playGong`, `playBlackBoxMusic`
 
 ### 🐛 Known Issues
 - Character images for Tuco, Gale, Jane, Flynn are placeholders — need real photos
+- Sound integration needs end-to-end test in real mode (mock tested)
 
 ### 📋 Next Tasks
+- End-to-end test in real mode: verify all sound timings, gong placement, black_box warmup dialogue
 - Provide real character photos for tuco.jpg, gale.jpg, jane.jpg, flynn.jpg
-- End-to-end test in real mode: verify hint-based reasoning narrative quality

@@ -1,8 +1,11 @@
+// Barrel re-export — consumers import from here rather than from sub-files directly.
+
 export { RealtimeSession } from "./realtime.session.js";
 
 export {
   TOOL_END_ROUND,
   buildModeratorBaseInstructions,
+  buildPostAnswerBaseInstructions,
   buildQuestionReadPrompt,
   buildAttentionCuePrompt,
   buildQuestionBodyPrompt,
@@ -11,6 +14,11 @@ export {
   buildWarmupReactionPrompt,
   buildWarmupReactionWithVideoCuePrompt,
   buildWheelSmallTalkPrompt,
+  buildWatchScreenPrompt,
+  buildTimeCuePrompt,
+  buildListeningCuePrompt,
+  buildSegueCuePrompt,
+  buildExplanationCuePrompt,
 } from "./realtime.prompts.js";
 
 export {

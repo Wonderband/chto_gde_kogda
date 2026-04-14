@@ -10,6 +10,8 @@ import {
   buildWarmupReactionWithVideoCuePrompt,
   buildAttentionCuePrompt,
   buildQuestionBodyPrompt,
+  buildWatchScreenPrompt,
+  buildTimeCuePrompt,
 } from "./realtime.prompts.js";
 import { playGong, playBlackBoxMusic } from "../utils/sounds.js";
 
@@ -30,39 +32,6 @@ function isVideoQuestion(gameContext) {
   return q.presentation_mode === "video" && !!q.video_src;
 }
 
-function buildWatchScreenPrompt(gameContext) {
-  const isRu = (gameContext?.game_language || "uk") !== "uk";
-  const q = gameContext?.current_question || {};
-  const pos = q.blitz_position || 1;
-
-  if (q.round_type === "blitz") {
-    const posLabel = isRu
-      ? ["Первый", "Второй", "Третий"][pos - 1] || `${pos}-й`
-      : ["Перше", "Друге", "Третє"][pos - 1] || `${pos}-е`;
-
-    return isRu
-      ? `ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «Внимание на экран. ${posLabel} вопрос.» Після цього одразу замовкни.`
-      : `ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «Увага на екран. ${posLabel} питання.» Після цього одразу замовкни.`;
-  }
-
-  return isRu
-    ? "ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «А теперь — внимание на экран.» Після цього одразу замовкни."
-    : "ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «А тепер — увага на екран.» Після цього одразу замовкни.";
-}
-
-function buildTimeCuePrompt(gameContext) {
-  const isRu = (gameContext?.game_language || "uk") !== "uk";
-  const isBlitz = gameContext?.current_question?.round_type === "blitz";
-  const line = isBlitz
-    ? isRu
-      ? "Время! Двадцать секунд!"
-      : "Час! Двадцять секунд!"
-    : isRu
-    ? "Время! Минута обсуждения!"
-    : "Час! Хвилина обговорення!";
-
-  return `ПОТОЧНА ФАЗА: ЗАПУСК ОБГОВОРЕННЯ ПІСЛЯ ВІДЕОПИТАННЯ. Скажи рівно одну коротку фразу: «${line}» Після цього одразу замовкни.`;
-}
 
 async function waitForCompletedSpokenTurn(session, responseId, label) {
   const doneEvent = await session.waitForResponseDone(responseId, 60000);
@@ -274,7 +243,7 @@ export async function runSessionOneFlow({
           instructions: buildBlackBoxWarmupOpeningPrompt(gameContext),
           outputModalities: ["audio"],
           metadata: { stage: "black_box_warmup_opening" },
-          maxOutputTokens: TOKENS.WARMUP_REACTION,
+          maxOutputTokens: TOKENS.COMBINED_INTRO,
         });
         console.log("[Realtime][Session1] black box warmup opening created", { responseId: openingResponse.responseId });
         await waitForSpokenTurn(session, openingResponse.responseId, "black box warmup opening");
@@ -291,8 +260,14 @@ export async function runSessionOneFlow({
           playerResponded = true;
 
           const transcript = await session.waitForInputTranscript(2000);
-          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript ?? "(транскрипт не отримано)");
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript || "(транскрипт не отримано)");
 
+          if (!transcript) {
+            // Empty transcript = STT got nothing intelligible — skip personalised reaction,
+            // fall through to the "Увага на екран!" cue below (playerResponded stays true
+            // so we DON'T fire the duplicate cue path, but we do need to emit the cue now).
+            playerResponded = false;
+          } else {
           const reactionResponse = await session.createResponse({
             instructions: buildWarmupReactionWithVideoCuePrompt(gameContext, transcript),
             outputModalities: ["audio"],
@@ -302,6 +277,7 @@ export async function runSessionOneFlow({
           const reactionText = session.getResponseTranscript(reactionResponse.responseId);
           console.log("[DIALOGUE][Session1] РЕАКЦІЯ:", reactionText || "(no transcript)");
           console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+          } // end else (transcript non-empty)
         } catch {
           console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
           console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
@@ -432,7 +408,7 @@ export async function runSessionOneFlow({
     instructions: buildAttentionCuePrompt(gameContext),
     outputModalities: ["audio"],
     metadata: { stage: "attention_cue" },
-    maxOutputTokens: TOKENS.COMBINED_INTRO,
+    maxOutputTokens: TOKENS.ATTENTION_CUE,
   });
   console.log("[Realtime][Session1] attention cue created", { responseId: attentionResponse.responseId });
   await waitForCompletedSpokenTurn(session, attentionResponse.responseId, "attention cue");
@@ -476,7 +452,7 @@ export async function finishVideoQuestionFlow({
     instructions: buildTimeCuePrompt(gameContext),
     outputModalities: ["audio"],
     metadata: { stage: "video_question_time" },
-    maxOutputTokens: TOKENS.WHEEL_OPENING,
+    maxOutputTokens: TOKENS.VIDEO_CUE,
   });
 
   console.log("[Realtime][Session1] video time cue response created", {
