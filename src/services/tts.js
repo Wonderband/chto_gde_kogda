@@ -7,7 +7,7 @@ const API_URL = 'https://api.openai.com/v1/audio/speech'
 
 let currentAudio = null
 
-export async function speak(text, { onStart, onEnd, voice } = {}) {
+export async function speak(text, { onStart, onEnd, voice, instructions } = {}) {
   if (USE_MOCK) return mockSpeak(text, { onStart, onEnd })
 
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY
@@ -15,13 +15,18 @@ export async function speak(text, { onStart, onEnd, voice } = {}) {
 
   stopSpeaking()
 
+  const body = { model: TTS_MODEL, voice: voice ?? TTS_VOICE, input: text }
+  // `instructions` is supported by gpt-4o-mini-tts and newer models.
+  // Used to enforce Ukrainian pronunciation — tts-1 ignores it silently.
+  if (instructions) body.instructions = instructions
+
   const response = await fetch(API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ model: TTS_MODEL, voice: voice ?? TTS_VOICE, input: text }),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {

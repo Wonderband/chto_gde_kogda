@@ -42,8 +42,10 @@ export const PLAYER_NAMES = (e.VITE_PLAYER_NAMES || "")
 export const REALTIME_MODEL = e.VITE_REALTIME_MODEL || "gpt-realtime-mini";
 /** Realtime API voice (used for ALL live moderator speech) */
 export const REALTIME_VOICE = e.VITE_REALTIME_VOICE || "echo";
-/** TTS model for non-realtime announcements (Стоп!, mock mode) */
-export const TTS_MODEL = e.VITE_TTS_MODEL || "tts-1";
+/** TTS model for non-realtime announcements (Стоп!, mock mode).
+ *  gpt-4o-mini-tts supports the `instructions` field for language hints,
+ *  which fixes the English accent on Ukrainian text. */
+export const TTS_MODEL = e.VITE_TTS_MODEL || "gpt-4o-mini-tts";
 /** TTS voice */
 export const TTS_VOICE = e.VITE_TTS_VOICE || "onyx";
 /** Speech-to-text model for team answer transcription */
@@ -65,10 +67,10 @@ export const FAST_EVALUATOR_MODEL =
  */
 export const TOKENS = {
   WHEEL_OPENING: 350, // spinning phase opener            (~6–7 s, player-specific banter + reaction)
-  COMBINED_INTRO: 400, // sector + character + intro_flavor (~7 s, one combined monologue)
+  COMBINED_INTRO: 600, // sector + character + intro_flavor (~10 s, one combined monologue)
   WARMUP_REACTION: 200, // warmup reaction phrase            (~3 s; +video cue when needed)
   VIDEO_CUE: 150, // "увага на екран" / "Час! Двадцять секунд!" (~2 s, 3–5 words max)
-  ATTENTION_CUE: 200, // "Увага! Питання!" or blitz announcement  (~3 s, up to ~15 words for blitz)
+  ATTENTION_CUE: 400, // "Увага! Питання!" or blitz announcement  (~6 s, up to ~15 words for blitz)
   LISTENING_CUE: 220, // "Час вийшов. Хто відповідатиме?"         (~4–5 s)
   SEGUE_CUE: 200, // "А тепер — правильна відповідь."         (~3 s)
   EXPLANATION_CUE: 1000, // full explanation narrative         (~20–30 s)
