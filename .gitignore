@@ -21,3 +21,5 @@ Desktop.ini
 
 # ── Claude Code local state ───────────────────────────────────────────────────
 .claude/
+
+ngrok.exe

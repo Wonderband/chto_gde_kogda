@@ -63,7 +63,11 @@ export function safeJsonParse(value, fallback = {}) {
 
 export function extractPersonaPrelude(systemPrompt = "") {
   if (!systemPrompt) return "";
+  // PERSONA_END marks the boundary between the Voroshilov voice/style definition
+  // (used by dialogue phases) and the BB character roster (not needed by any prompt).
+  // All other markers kept as legacy fallbacks.
   const stopMarkers = [
+    "<!-- PERSONA_END -->",
     "## СЦЕНАРИЙ ИГРЫ",
     "### ФАЗА 1",
     "## HOW TO USE THIS FILE",

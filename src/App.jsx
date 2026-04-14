@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { GameProvider, useGame } from "./game/GameContext";
 import { STATES } from "./game/gameStateMachine";
 import { DISCUSSION_SEC, BLITZ_SEC, GAME_LANGUAGE } from "./config.js";
@@ -93,11 +93,17 @@ function Game() {
     closePostSession,
   });
 
+  // Keep a live ref to currentQuestion so useRecording can pass it to STT
+  // without stale-closure issues (doStopRecording is a useCallback).
+  const currentQuestionRef = useRef(currentQuestion);
+  useEffect(() => { currentQuestionRef.current = currentQuestion; }, [currentQuestion]);
+
   const { doStopRef } = useRecording(
     isRecording,
     setIsRecording,
     recorderRef,
-    send
+    send,
+    currentQuestionRef
   );
 
   useKeyboardControls({

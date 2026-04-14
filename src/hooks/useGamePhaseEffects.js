@@ -27,6 +27,7 @@ import {
   SOUND_VOLUMES,
 } from "../config.js";
 import { playGong, playBlackBoxMusic, playLooped } from "../utils/sounds.js";
+import { timeLine, blitzPositionLabel } from "../game/gameText.js";
 
 const ORDINALS_UK = [
   "Перший", "Другий", "Третій", "Четвертий", "П'ятий",
@@ -73,15 +74,9 @@ function buildVideoFullIntroFallbackText(question, sectorNumber, lang) {
     : `Сектор ${sector}. Питання від ${character}. А тепер — увага на екран.`;
 }
 
+// Thin alias kept for call-site readability — delegates to shared gameText helper.
 function buildVideoTimeCueFallbackText(question, lang) {
-  const isRu = lang === "ru";
-  return question?.round_type === "blitz"
-    ? isRu
-      ? "Время! Двадцать секунд!"
-      : "Час! Двадцять секунд!"
-    : isRu
-    ? "Время! Минута обсуждения!"
-    : "Час! Хвилина обговорення!";
+  return timeLine(question, lang);
 }
 
 /**
@@ -222,7 +217,14 @@ export function useGamePhaseEffects({
 
     (async () => {
       try {
-        await tts(announcementText, { voice: REALTIME_VOICE });
+        await tts(announcementText, {
+          voice: REALTIME_VOICE,
+          // Enforce Ukrainian pronunciation — gpt-4o-mini-tts honours this;
+          // tts-1 ignores it silently (no harm done).
+          instructions: GAME_LANGUAGE === "ru"
+            ? "Говори на русском языке. Произноси все слова как носитель русского языка."
+            : "Говори українською мовою. Вимовляй усі слова як носій української мови.",
+        });
       } catch (e) {
         console.error("[ANNOUNCING] TTS failed", e);
       } finally {

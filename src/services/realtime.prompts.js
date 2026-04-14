@@ -1,7 +1,5 @@
-import {
-  extractPersonaPrelude,
-  wheelBanterSeed,
-} from "./realtime.shared.js";
+import { extractPersonaPrelude, wheelBanterSeed } from "./realtime.shared.js";
+import { timeLine, blitzPositionLabel } from "../game/gameText.js";
 
 export const TOOL_END_ROUND = {
   type: "function",
@@ -29,38 +27,24 @@ export const TOOL_END_ROUND = {
   },
 };
 
+// Thin wrappers around shared gameText helpers — keep prompt-file API unchanged.
 function timeLineForQuestion(gameContext) {
-  const isRu = (gameContext.game_language || "uk") !== "uk";
-  return gameContext.current_question?.round_type === "blitz"
-    ? isRu
-      ? "Время! Двадцать секунд."
-      : "Час! Двадцять секунд."
-    : isRu
-      ? "Время! Минута обсуждения."
-      : "Час! Хвилина обговорення.";
+  const lang = gameContext.game_language || "uk";
+  return timeLine(gameContext.current_question, lang);
 }
 
 function attentionLineForQuestion(gameContext) {
   const isRu = (gameContext.game_language || "uk") !== "uk";
   const q = gameContext.current_question || {};
-  const pos = q.blitz_position || 1;
-  const blitzPosLabel = isRu
-    ? ["Первый", "Второй", "Третий"][pos - 1] || `${pos}-й`
-    : ["Перше", "Друге", "Третє"][pos - 1] || `${pos}-е`;
 
   if (q.round_type !== "blitz") {
     return isRu ? "Внимание! Вопрос!" : "Увага! Питання!";
   }
 
-  if (pos === 1) {
-    return isRu
-      ? "Сектор Блиц! Три вопроса. Три телезрителя. Двадцать секунд на каждый. Внимание! Первый вопрос!"
-      : "Сектор Бліц! Три питання. Три телеглядачі. Двадцять секунд на кожне. Увага! Перше питання!";
-  }
-
-  return isRu
-    ? `Внимание! ${blitzPosLabel} вопрос!`
-    : `Увага! ${blitzPosLabel} питання!`;
+  // All blitz positions use the same short cue — blitz rules are announced
+  // once in buildCombinedIntroPrompt at the start of the round, not repeated here.
+  const label = blitzPositionLabel(q.blitz_position || 1, isRu ? "ru" : "uk");
+  return isRu ? `Внимание! ${label} вопрос!` : `Увага! ${label} питання!`;
 }
 
 export function buildModeratorBaseInstructions(systemPrompt = "") {
@@ -107,82 +91,117 @@ export function buildWheelOpeningPrompt(gameContext) {
         targetPlayer.name,
         targetPlayer.profession ? `(${targetPlayer.profession})` : null,
         targetHobbies ? `захоплення: ${targetHobbies}` : null,
-      ].filter(Boolean).join(", ")
+      ]
+        .filter(Boolean)
+        .join(", ")
     : null;
 
   // Precise game situation description — drives tone
   const situationHint = isRu
-    ? (isFirstRound
-        ? "Это ПЕРВЫЙ раунд — игра только начинается. Никаких прошлых раундов не было. Говори о начале, предвкушении, настрое."
-        : scoreDiff >= 2
-        ? `Знатоки ведут ${scoreExperts}:${scoreViewers}. Похвали команду — но не давай расслабляться.`
-        : scoreDiff <= -2
-        ? `Телезрители ведут ${scoreViewers}:${scoreExperts}. Поддержи знатоков — добавь тепла и веры в них.`
-        : Math.max(scoreExperts, scoreViewers) >= 4
-        ? `Счёт ${scoreExperts}:${scoreViewers} — развязка близко. Напряжение максимальное.`
-        : `Счёт ${scoreExperts}:${scoreViewers}. Борьба идёт ровно — ${totalRoundsPlayed} ${totalRoundsPlayed === 1 ? "раунд" : "раунда"} позади.`)
-    : (isFirstRound
-        ? "Це ПЕРШИЙ раунд — гра тільки починається. Жодних попередніх раундів не було. Говори про початок, передчуття, налаштування."
-        : scoreDiff >= 2
-        ? `Знавці ведуть ${scoreExperts}:${scoreViewers}. Похвали команду — але не давай розслаблятись.`
-        : scoreDiff <= -2
-        ? `Телеглядачі ведуть ${scoreViewers}:${scoreExperts}. Підтримай знавців — додай тепла і впевненості в них.`
-        : Math.max(scoreExperts, scoreViewers) >= 4
-        ? `Рахунок ${scoreExperts}:${scoreViewers} — розв'язка близько. Напруга максимальна.`
-        : `Рахунок ${scoreExperts}:${scoreViewers}. Боротьба йде рівно — ${totalRoundsPlayed} ${totalRoundsPlayed === 1 ? "раунд" : "раунди"} позаду.`);
+    ? isFirstRound
+      ? "Это ПЕРВЫЙ раунд — игра только начинается. Никаких прошлых раундов не было. Говори о начале, предвкушении, настрое."
+      : scoreDiff >= 2
+      ? `Знатоки ведут ${scoreExperts}:${scoreViewers}. Похвали команду — но не давай расслабляться.`
+      : scoreDiff <= -2
+      ? `Телезрители ведут ${scoreViewers}:${scoreExperts}. Поддержи знатоков — добавь тепла и веры в них.`
+      : Math.max(scoreExperts, scoreViewers) >= 4
+      ? `Счёт ${scoreExperts}:${scoreViewers} — развязка близко. Напряжение максимальное.`
+      : `Счёт ${scoreExperts}:${scoreViewers}. Борьба идёт ровно — ${totalRoundsPlayed} ${
+          totalRoundsPlayed === 1 ? "раунд" : "раунда"
+        } позади.`
+    : isFirstRound
+    ? "Це ПЕРШИЙ раунд — гра тільки починається. Жодних попередніх раундів не було. Говори про початок, передчуття, налаштування."
+    : scoreDiff >= 2
+    ? `Знавці ведуть ${scoreExperts}:${scoreViewers}. Похвали команду — але не давай розслаблятись.`
+    : scoreDiff <= -2
+    ? `Телеглядачі ведуть ${scoreViewers}:${scoreExperts}. Підтримай знавців — додай тепла і впевненості в них.`
+    : Math.max(scoreExperts, scoreViewers) >= 4
+    ? `Рахунок ${scoreExperts}:${scoreViewers} — розв'язка близько. Напруга максимальна.`
+    : `Рахунок ${scoreExperts}:${scoreViewers}. Боротьба йде рівно — ${totalRoundsPlayed} ${
+        totalRoundsPlayed === 1 ? "раунд" : "раунди"
+      } позаду.`;
 
   // Topic angle rotates by round — 7 distinct angles prevent repetition.
   // Bug 5 fix: player-specific angles (indices 1 and 4) embed actual hobby/profession
   // data so the model uses real details instead of improvising generically.
-  const angles = isRu ? [
-    "Спроси о настроении и ожиданиях перед этим раундом.",
-    targetDesc
-      ? `Спроси ${targetPlayer.name} — как ${targetHobbies ? `увлечение «${targetHobbies}»` : targetPlayer.profession ? `работа ${targetPlayer.profession}` : "опыт"} помогает в интеллектуальных играх?`
-      : "Обратись к конкретному игроку — упомяни его хобби или профессию, свяжи с игрой.",
-    "Спроси, кто сегодня чувствует себя главным экспертом за столом.",
-    "Спроси — лёгким будет этот вопрос или коварным, что думают?",
-    targetDesc
-      ? `Спроси ${targetPlayer.name}: помогает ли ${targetPlayer.profession ? `профессия ${targetPlayer.profession}` : "твой опыт"} находить ответы быстрее?`
-      : "Обратись к конкретному игроку — спроси, как его профессиональный опыт помогает в игре.",
-    "Спроси у команды — кто из них рискнёт отвечать первым сегодня.",
-    "Лёгкая провокация: что сложнее — угадать тему или найти ответ?",
-  ] : [
-    "Запитай про настрій і очікування перед цим раундом.",
-    targetDesc
-      ? `Запитай ${targetPlayer.name} — як ${targetHobbies ? `захоплення «${targetHobbies}»` : targetPlayer.profession ? `робота ${targetPlayer.profession}` : "досвід"} допомагає в інтелектуальних іграх?`
-      : "Звернись до конкретного гравця — згадай його хобі або професію, прив'яжи до гри.",
-    "Запитай, хто сьогодні відчуває себе головним знавцем за столом.",
-    "Запитай — легким буде це питання чи підступним, що думають?",
-    targetDesc
-      ? `Запитай ${targetPlayer.name}: чи допомагає ${targetPlayer.profession ? `робота ${targetPlayer.profession}` : "досвід"} знаходити відповіді швидше?`
-      : "Звернись до конкретного гравця — запитай, як його фаховий досвід допомагає в грі.",
-    "Запитай у команди — хто з них ризикне відповідати першим сьогодні.",
-    "Легка провокація: що складніше — вгадати тему чи знайти відповідь?",
-  ];
+  const angles = isRu
+    ? [
+        "Спроси о настроении и ожиданиях перед этим раундом.",
+        targetDesc
+          ? `Спроси ${targetPlayer.name} — как ${
+              targetHobbies
+                ? `увлечение «${targetHobbies}»`
+                : targetPlayer.profession
+                ? `работа ${targetPlayer.profession}`
+                : "опыт"
+            } помогает в интеллектуальных играх?`
+          : "Обратись к конкретному игроку — упомяни его хобби или профессию, свяжи с игрой.",
+        "Спроси, кто сегодня чувствует себя главным экспертом за столом.",
+        "Спроси — лёгким будет этот вопрос или коварным, что думают?",
+        targetDesc
+          ? `Спроси ${targetPlayer.name}: помогает ли ${
+              targetPlayer.profession
+                ? `профессия ${targetPlayer.profession}`
+                : "твой опыт"
+            } находить ответы быстрее?`
+          : "Обратись к конкретному игроку — спроси, как его профессиональный опыт помогает в игре.",
+        "Спроси у команды — кто из них рискнёт отвечать первым сегодня.",
+        "Лёгкая провокация: что сложнее — угадать тему или найти ответ?",
+      ]
+    : [
+        "Запитай про настрій і очікування перед цим раундом.",
+        targetDesc
+          ? `Запитай ${targetPlayer.name} — як ${
+              targetHobbies
+                ? `захоплення «${targetHobbies}»`
+                : targetPlayer.profession
+                ? `робота ${targetPlayer.profession}`
+                : "досвід"
+            } допомагає в інтелектуальних іграх?`
+          : "Звернись до конкретного гравця — згадай його хобі або професію, прив'яжи до гри.",
+        "Запитай, хто сьогодні відчуває себе головним знавцем за столом.",
+        "Запитай — легким буде це питання чи підступним, що думають?",
+        targetDesc
+          ? `Запитай ${targetPlayer.name}: чи допомагає ${
+              targetPlayer.profession
+                ? `робота ${targetPlayer.profession}`
+                : "досвід"
+            } знаходити відповіді швидше?`
+          : "Звернись до конкретного гравця — запитай, як його фаховий досвід допомагає в грі.",
+        "Запитай у команди — хто з них ризикне відповідати першим сьогодні.",
+        "Легка провокація: що складніше — вгадати тему чи знайти відповідь?",
+      ];
 
   const topicAngle = angles[(round - 1) % angles.length];
 
-  const playerList = players.length > 0
-    ? players.map((p, i) => {
-        const hobbies = (p.hobbies || []).join(", ");
-        return `${i + 1}. ${p.name}${p.profession ? ` (${p.profession})` : ""}${hobbies ? `, захоплення: ${hobbies}` : ""}`;
-      }).join("\n")
-    : (isRu ? "  (список игроков не задан)" : "  (список гравців не задано)");
+  const playerList =
+    players.length > 0
+      ? players
+          .map((p, i) => {
+            const hobbies = (p.hobbies || []).join(", ");
+            return `${i + 1}. ${p.name}${
+              p.profession ? ` (${p.profession})` : ""
+            }${hobbies ? `, захоплення: ${hobbies}` : ""}`;
+          })
+          .join("\n")
+      : isRu
+      ? "  (список игроков не задан)"
+      : "  (список гравців не задано)";
 
   const firstRoundBan = isFirstRound
-    ? (isRu
-        ? "; НЕЛЬЗЯ упоминать «прошлый раунд», «предыдущий вопрос», «в прошлый раз»"
-        : "; ЗАБОРОНЕНО згадувати «минулий раунд», «попереднє питання», «минулого разу»")
+    ? isRu
+      ? "; НЕЛЬЗЯ упоминать «прошлый раунд», «предыдущий вопрос», «в прошлый раз»"
+      : "; ЗАБОРОНЕНО згадувати «минулий раунд», «попереднє питання», «минулого разу»"
     : "";
 
   // Bug 4 fix: name the target player explicitly so the model cannot default to Ania
   const addressLine = targetDesc
-    ? (isRu
-        ? `1. Звернись ОСОБИСТО до ${targetPlayer.name} — назви на ім'я. (Адресат цього раунду: ${targetDesc})`
-        : `1. Звернись ОСОБИСТО до ${targetPlayer.name} — назви на ім'я. (Адресат цього раунду: ${targetDesc})`)
-    : (isRu
-        ? "1. Звернись до команди в цілому."
-        : "1. Звернись до команди в цілому.");
+    ? isRu
+      ? `1. Звернись ОСОБИСТО до ${targetPlayer.name} — назви на ім'я. (Адресат цього раунду: ${targetDesc})`
+      : `1. Звернись ОСОБИСТО до ${targetPlayer.name} — назви на ім'я. (Адресат цього раунду: ${targetDesc})`
+    : isRu
+    ? "1. Звернись до команди в цілому."
+    : "1. Звернись до команди в цілому.";
 
   return `ПОТОЧНА ФАЗА: ЖИВА РОЗМОВА З ГРАВЦЯМИ — РАУНД ${round}.
 
@@ -209,23 +228,23 @@ export function buildWheelReactionPrompt(gameContext, transcript = null) {
   const lang = isRu ? "російська" : "українська";
 
   const transcriptLine = transcript
-    ? (isRu
-        ? `Игрок только что сказал: «${transcript}»\n\nСкажи ОДНУ короткую реплику ведущего — живую, тёплую, естественную реакцию на смысл сказанного. Можно с лёгкой иронией или поддержкой. Фраза должна быть грамматически цельной и понятной. НЕ повторяй слова игрока дословно. Если сказанное непонятно — отреагируй на общий тон (оптимизм, уверенность, сомнение).`
-        : `Гравець щойно сказав: «${transcript}»\n\nСкажи ОДНУ коротку репліку ведучого — живу, природну реакцію на зміст сказаного. Можна з легкою іронією або підтримкою. Фраза має бути граматично цілою і зрозумілою. НЕ повторюй слова гравця дослівно. Якщо сказане незрозуміле — відреагуй на загальний тон (оптимізм, впевненість, сумнів).`)
-    : (isRu
-        ? "Скажи ОДНУ короткую живую реплику — естественную реакцию ведущего на то, что сказал игрок."
-        : "Скажи ОДНУ коротку живу репліку — природну реакцію ведучого на те, що сказав гравець.");
+    ? isRu
+      ? `Игрок только что сказал: «${transcript}»\n\nОдна короткая реплика Ворошилова — иронично, точно, с характером. Зацепись за что-то конкретное из сказанного. Не повторяй слова дословно.`
+      : `Гравець щойно сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, точно, з характером. Зачепись за щось конкретне зі сказаного. НЕ повторюй слова дослівно.`
+    : isRu
+    ? "Одна короткая живая реплика Ворошилова. С характером, без банальностей."
+    : "Одна коротка жива репліка Ворошилова. З характером, без банальностей.";
 
-  return `ПОТОЧНА ФАЗА: ОДНА ФРАЗА-РЕАКЦІЯ — ПОТІМ ТИША.
+  return `ПОТОЧНА ФАЗА: РЕПЛІКА-РЕАКЦІЯ — ПОТІМ ТИША.
 
 ${transcriptLine}
 
-Максимум 8 слів. Після цієї фрази — ПОВНА ТИША.
+Після реакції — ПОВНА ТИША.
 
 АБСОЛЮТНО ЗАБОРОНЕНО:
-- Нові запитання, що вимагають відповіді (дозволено лише риторичне повторення слів гравця)
-- Загальні фрази без прив'язки до сказаного: «цікаво», «ого», «добре», «це цікава історія», «бажаю успіху», «вперед», «дякую», «так-так», «розумію»
-- Продовжувати діалог після реакції
+- Нові запитання, що вимагають відповіді
+- Порожні фрази без зв'язку зі сказаним: «цікаво», «ого», «добре», «це цікава історія», «бажаю успіху», «вперед», «дякую», «так-так», «розумію»
+- Більше однієї фрази
 - Згадувати персонажів Breaking Bad, сектор, майбутнє питання
 Мова: ${lang}.
 `;
@@ -239,7 +258,9 @@ export function buildWheelSmallTalkPrompt(gameContext, index = 0) {
 Підказка: ${wheelBanterSeed(index, isRu)}
 Після однієї репліки зупинись. Не згадуй персонажів, сектор або майбутнє питання.
 
-Мова: ${isRu ? "російська" : "українська"}. Рахунок: ${gameContext.score?.experts ?? 0} : ${gameContext.score?.viewers ?? 0}.
+Мова: ${isRu ? "російська" : "українська"}. Рахунок: ${
+    gameContext.score?.experts ?? 0
+  } : ${gameContext.score?.viewers ?? 0}.
 `;
 }
 
@@ -253,39 +274,92 @@ export function buildCombinedIntroPrompt(gameContext) {
   const isRu = (gameContext.game_language || "uk") !== "uk";
   const flavor = q.intro_flavor || "";
   const isBlackBox = q.round_type === "black_box";
+  const isBlitz = q.round_type === "blitz";
   const blackBoxCue = isRu ? "Внимание, чёрный ящик!" : "Увага, чорний ящик!";
+  const character =
+    q.character || (isRu ? "Неизвестный персонаж" : "Невідомий персонаж");
 
-  let steps;
-  if (isBlackBox) {
-    // Black box intro: sector → character → "Увага, чорний ящик!"
-    // The intro_flavor (warmup question) is intentionally NOT read here —
-    // it will be asked by the moderator AFTER the black_box music plays.
-    steps = `1. Оголоси сектор номер ${gameContext.sector_number}.
-2. Представ автора питання: ${q.character || "Невідомий персонаж"}.
-3. Скажи рівно: «${blackBoxCue}»
-4. Одразу замовкни.`;
-  } else {
-    steps = flavor
-      ? `1. Оголоси сектор номер ${gameContext.sector_number}.
-2. Представ автора питання: ${q.character || "Невідомий персонаж"}.
+  // ── Blitz: announce sector + blitz rules once, then introduce character ──
+  // The "three questions, 20 seconds each" announcement lives here — NOT in the
+  // attention cue — so it is said exactly once, at the very start of the round.
+  if (isBlitz) {
+    const blitzRules = isRu
+      ? `Сектор ${gameContext.sector_number}. Сектор Блиц! Три вопроса. Двадцять секунд на каждый.`
+      : `Сектор ${gameContext.sector_number}. Сектор Бліц! Три питання. Двадцять секунд на кожне.`;
+
+    if (flavor) {
+      return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО БЛИЦ-РАУНДУ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
+ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
+
+Виконай суворо у такому порядку:
+1. Скажи РІВНО: «${blitzRules}»
+2. В ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
 3. Зачитай ДОСЛІВНО: «${flavor}»
-4. Одразу замовкни.`
-      : `1. Оголоси сектор номер ${gameContext.sector_number}.
-2. Представ автора питання: ${q.character || "Невідомий персонаж"}.
-3. Одразу замовкни.`;
+
+Після третього пункту одразу замовкни.
+Разом: фіксована фраза + 1 речення від себе + дослівна репліка. Мова: ${
+        isRu ? "російська" : "українська"
+      }.
+`;
+    }
+
+    return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО БЛИЦ-РАУНДУ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
+ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
+
+Виконай суворо у такому порядку:
+1. Скажи РІВНО: «${blitzRules}»
+2. В ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
+
+Після другого пункту одразу замовкни.
+Разом: фіксована фраза + 1 речення від себе. Мова: ${
+      isRu ? "російська" : "українська"
+    }.
+`;
+  }
+
+  if (isBlackBox) {
+    // Black box: must end with exact cue phrase; intro_flavor is read AFTER music.
+    return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО РАУНДУ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
+ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
+
+Оголоси сектор і в ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
+Наприкінці скажи РІВНО: «${blackBoxCue}» — і замовкни.
+
+Разом: максимум 2 речення. Мова: ${isRu ? "російська" : "українська"}.
+`;
+  }
+
+  if (flavor) {
+    return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО РАУНДУ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
+ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
+
+Оголоси сектор і в ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
+Потім зачитай ДОСЛІВНО: «${flavor}»
+Після цього одразу замовкни.
+
+Разом: 1 коротке речення від себе + дослівна репліка. Мова: ${
+      isRu ? "російська" : "українська"
+    }.
+`;
   }
 
   return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО РАУНДУ.
 
-ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ОГОЛОШЕННЯ СЕКТОРУ.
-ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Звісно», «Я зараз», «Починаю», «Оголошую» — будь-яка вступна або підтверджувальна фраза.
-Приклад правильного початку: «Сектор ${gameContext.sector_number}…» — і більше нічого перед цим.
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
+ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
 
-Виконай суворо у такому порядку:
-${steps}
+Оголоси сектор і в ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
+Потім одразу замовкни.
 
-Нічого не кажи після останнього кроку.
-Мова: ${isRu ? "російська" : "українська"}.
+Разом: максимум 2 речення. Мова: ${isRu ? "російська" : "українська"}.
 `;
 }
 
@@ -294,17 +368,20 @@ ${steps}
  * Folds the video transition cue into the warmup reaction — no separate video
  * intro response needed, so no warmup context bleeds into a standalone cue.
  */
-export function buildWarmupReactionWithVideoCuePrompt(gameContext, transcript = null) {
+export function buildWarmupReactionWithVideoCuePrompt(
+  gameContext,
+  transcript = null
+) {
   const isRu = (gameContext.game_language || "uk") !== "uk";
   const cue = isRu ? "Внимание на экран!" : "Увага на екран!";
 
   const transcriptInstruction = transcript
-    ? (isRu
-        ? `Игрок сказал: «${transcript}»\n\nСкажи ОДНУ коротку репліку (максимум 7 слів) — живу, природну реакцію на зміст сказаного. Фраза має бути граматично ціла і зрозуміла. НЕ повторюй слова гравця дослівно`
-        : `Гравець сказав: «${transcript}»\n\nСкажи ОДНУ коротку репліку (максимум 7 слів) — живу, природну реакцію на зміст сказаного. Фраза має бути граматично ціла і зрозуміла. НЕ повторюй слова гравця дослівно`)
-    : (isRu
-        ? "Скажи ОДНУ коротку репліку (максимум 7 слів) — природну реакцію ведучого на те, що сказав гравець"
-        : "Скажи ОДНУ коротку репліку (максимум 7 слів) — природну реакцію ведучого на те, що сказав гравець");
+    ? isRu
+      ? `Игрок сказал: «${transcript}»\n\nОдна короткая реплика Ворошилова — иронично, с характером. Зацепись за конкретное из сказанного. НЕ повторяй слова дословно`
+      : `Гравець сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, з характером. Зачепись за конкретне зі сказаного. НЕ повторюй слова дослівно`
+    : isRu
+    ? "Одна коротка жива репліка Ворошилова на сказане гравцем. З характером, без банальностей"
+    : "Одна коротка жива репліка Ворошилова на сказане гравцем. З характером, без банальностей";
 
   const lang = isRu ? "російська" : "українська";
   return `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
@@ -323,12 +400,12 @@ export function buildWarmupReactionPrompt(gameContext, transcript = null) {
   // Breaking Bad content is scripted fiction; the model must stay in persona.
 
   const transcriptInstruction = transcript
-    ? (isRu
-        ? `Гравець сказав: «${transcript}»\n\nВимов ОДНУ фразу-реакцію (максимум 7 слів) — живу, природну реакцію на зміст сказаного. Фраза має бути граматично ціла і зрозуміла. НЕ повторюй слова гравця дослівно.`
-        : `Гравець сказав: «${transcript}»\n\nВимов ОДНУ фразу-реакцію (максимум 7 слів) — живу, природну реакцію на зміст сказаного. Фраза має бути граматично ціла і зрозуміла. НЕ повторюй слова гравця дослівно.`)
-    : (isRu
-        ? "Вимов ОДНУ фразу-реакцію (максимум 7 слів) — природну реакцію ведучого на те, що щойно сказав гравець."
-        : "Вимов ОДНУ фразу-реакцію (максимум 7 слів) — природну реакцію ведучого на те, що щойно сказав гравець.");
+    ? isRu
+      ? `Гравець сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, точно, з характером. Зачепись за щось конкретне зі сказаного. НЕ повторюй слова дослівно.`
+      : `Гравець сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, точно, з характером. Зачепись за щось конкретне зі сказаного. НЕ повторюй слова дослівно.`
+    : isRu
+    ? "Одна коротка жива репліка Ворошилова. З характером, без банальностей."
+    : "Одна коротка жива репліка Ворошилова. З характером, без банальностей.";
 
   const lang = isRu ? "російська" : "українська";
   return `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
@@ -346,7 +423,10 @@ ${transcriptInstruction}
 `;
 }
 
-export function buildNameConfirmationPrompt(gameContext = {}, transcript = null) {
+export function buildNameConfirmationPrompt(
+  gameContext = {},
+  transcript = null
+) {
   const ru = (gameContext.game_language || "uk") !== "uk";
   const fallback = ru ? "Слушаем вас!" : "Слухаємо вас!";
   const lang = ru ? "російська" : "українська";
@@ -430,7 +510,8 @@ export function buildQuestionReadPrompt(gameContext) {
 export function buildBlackBoxWarmupOpeningPrompt(gameContext) {
   const q = gameContext.current_question || {};
   const isRu = (gameContext.game_language || "uk") !== "uk";
-  const flavor = q.intro_flavor || (isRu ? "Итак, что думаете?" : "Отже, що думаєте?");
+  const flavor =
+    q.intro_flavor || (isRu ? "Итак, что думаете?" : "Отже, що думаєте?");
 
   return `ПОТОЧНА ФАЗА: ЖИВИЙ ДІАЛОГ З ГРАВЦЯМИ ПІСЛЯ ЧОРНОГО ЯЩИКА.
 
@@ -446,10 +527,12 @@ export function buildBlackBoxWarmupOpeningPrompt(gameContext) {
 
 export function buildAttentionCuePrompt(gameContext) {
   const attention = attentionLineForQuestion(gameContext);
-  return `ПОТОЧНА ФАЗА: ОДНА РЕПЛІКА — УВАГА.
+  return `ПОПЕРЕДНІЙ ДІАЛОГ ЗАВЕРШЕНО. Ти більше НЕ в розмові з гравцями. Будь-який попередній обмін репліками не має значення і НЕ повинен впливати на цю репліку.
+
+ПОТОЧНА ФАЗА: ОДНА РЕПЛІКА — УВАГА.
 
 ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ОГОЛОШЕННЯ.
-ЗАБОРОНЕНО: будь-яка вступна або підтверджувальна фраза.
+ЗАБОРОНЕНО: продовжувати попередню розмову. ЗАБОРОНЕНО: будь-яка вступна або підтверджувальна фраза.
 
 Скажи РІВНО: «${attention}»
 
@@ -465,10 +548,12 @@ export function buildQuestionBodyPrompt(gameContext) {
   const q = gameContext.current_question || {};
   const questionText = q.question_text || "";
   const timeLine = timeLineForQuestion(gameContext);
-  return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ЗАЧИТУВАННЯ ТЕКСТУ ПИТАННЯ.
+  return `ПОПЕРЕДНІЙ ДІАЛОГ ЗАВЕРШЕНО. Ти більше НЕ в розмові з гравцями. Жоден попередній обмін репліками не має значення.
+
+ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ЗАЧИТУВАННЯ ТЕКСТУ ПИТАННЯ.
 
 ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПИТАННЯ — без жодного вступного слова.
-ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Отже», «Слухайте» або будь-яка вступна фраза.
+ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Отже», «Слухайте», будь-яка вступна фраза, продовження попередньої розмови.
 
 Виконай суворо у такому порядку:
 1. Зачитай питання ДОСЛІВНО: «${questionText}»
@@ -512,8 +597,12 @@ export function buildTimeCuePrompt(gameContext) {
   const isRu = (gameContext?.game_language || "uk") !== "uk";
   const isBlitz = gameContext?.current_question?.round_type === "blitz";
   const line = isBlitz
-    ? isRu ? "Время! Двадцать секунд!" : "Час! Двадцять секунд!"
-    : isRu ? "Время! Минута обсуждения!" : "Час! Хвилина обговорення!";
+    ? isRu
+      ? "Время! Двадцать секунд!"
+      : "Час! Двадцять секунд!"
+    : isRu
+    ? "Время! Минута обсуждения!"
+    : "Час! Хвилина обговорення!";
   return `ПОТОЧНА ФАЗА: ЗАПУСК ОБГОВОРЕННЯ ПІСЛЯ ВІДЕОПИТАННЯ. Скажи рівно одну коротку фразу: «${line}» Після цього одразу замовкни.`;
 }
 
@@ -527,8 +616,12 @@ export function buildTimeCuePrompt(gameContext) {
 export function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
   const isRu = (gameContext.game_language || "uk") !== "uk";
   const line = earlyAnswer
-    ? isRu ? "Досрочный ответ. Кто будет отвечать?" : "Дострокова відповідь. Хто відповідатиме?"
-    : isRu ? "Время вышло. Кто будет отвечать?" : "Час вийшов. Хто відповідатиме?";
+    ? isRu
+      ? "Досрочный ответ. Кто будет отвечать?"
+      : "Дострокова відповідь. Хто відповідатиме?"
+    : isRu
+    ? "Время вышло. Кто будет отвечать?"
+    : "Час вийшов. Хто відповідатиме?";
   return `ПОТОЧНА ФАЗА: КОРОТКА РЕПЛІКА ПЕРЕД ЗАПИСОМ ВІДПОВІДІ.
 
 Скажи РІВНО ЦЮ фразу і одразу замовкни:
@@ -586,6 +679,17 @@ export function buildExplanationCuePrompt(text) {
  * Use instead of buildModeratorBaseInstructions() for playNeutralSegueCue
  * and playExplanationCue.
  */
+/**
+ * Minimal instructions for verbatim-read phases where the model is purely a
+ * text-to-speech puppet (attention cue, question body, time cue, watch screen).
+ * No persona, no rules — just "read what's given and stop".
+ * Saves ~2,100 tokens vs buildModeratorBaseInstructions on every call.
+ */
+export function buildVerbatimBaseInstructions() {
+  return `Ти — ведучий телевізійної гри. Зараз ти зачитуєш текст дослівно.
+ПРАВИЛА: Починай одразу з першого слова. Без вступних фраз. Без імпровізації. Без коментарів після тексту.`;
+}
+
 export function buildPostAnswerBaseInstructions(systemPrompt = "") {
   const personaPrelude = extractPersonaPrelude(systemPrompt);
   return `${personaPrelude}

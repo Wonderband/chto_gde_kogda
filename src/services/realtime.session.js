@@ -289,8 +289,15 @@ export class RealtimeSession {
       turn_detection,
       // Enable server-side input transcription so we can capture what the player
       // said and inject it into the reaction prompt for context-aware responses.
-      // Lock to game language so the model doesn't drift to Turkish/other Cyrillic-adjacent languages.
-      input_audio_transcription: { model: "gpt-4o-mini-transcribe", language: GAME_LANGUAGE === "ru" ? "ru" : "uk" },
+      // Lock to game language + supply BB vocabulary so the model doesn't drift
+      // to Turkish/other Cyrillic-adjacent languages or invent unknown words.
+      input_audio_transcription: {
+        model: "gpt-4o-mini-transcribe",
+        language: GAME_LANGUAGE === "ru" ? "ru" : "uk",
+        prompt: GAME_LANGUAGE === "ru"
+          ? "Язык: русский. Имена: Уолтер Уайт, Джесси Пинкман, Хайзенберг, Густаво Фринг, Сол Гудман, Скайлер Уайт, Хэнк Шрейдер, Альбукерке. Не придумывай слов, которых не было сказано."
+          : "Мова: українська. Імена: Волтер Вайт, Джессі Пінкман, Гайзенберг, Густаво Фрінг, Сол Гудман, Скайлер Вайт, Генк Шрейдер, Альбукерке. Не вигадуй слів, яких не було сказано.",
+      },
     };
     if (instructions != null) patch.instructions = instructions;
     await this.updateSession(patch);

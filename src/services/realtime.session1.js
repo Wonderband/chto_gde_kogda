@@ -2,6 +2,7 @@ import { delay } from "./realtime.shared.js";
 import { TOKENS } from "../config.js";
 import {
   buildModeratorBaseInstructions,
+  buildVerbatimBaseInstructions,
   buildWheelOpeningPrompt,
   buildWheelReactionPrompt,
   buildCombinedIntroPrompt,
@@ -137,18 +138,25 @@ export async function startWheelDialogue(session, systemPrompt, gameContext, {
     // Capture input transcript — non-blocking, 2s timeout.
     // Injected into the reaction prompt so the model references what was actually said.
     const transcript = await session.waitForInputTranscript(2000);
-    console.log("[DIALOGUE][Spin] ГРАВЕЦЬ:", transcript ?? "(транскрипт не отримано)");
 
-    // ── Step 3: one reaction phrase ──
-    const reactionResponse = await session.createResponse({
-      instructions: buildWheelReactionPrompt(gameContext, transcript),
-      outputModalities: ["audio"],
-      maxOutputTokens: TOKENS.WHEEL_OPENING,
-    });
-    await waitForSpokenTurn(session, reactionResponse.responseId, "reaction");
-    const reactionText = session.getResponseTranscript(reactionResponse.responseId);
-    console.log("[DIALOGUE][Spin] РЕАКЦІЯ: ", reactionText || "(no transcript)");
-    console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
+    if (!transcript) {
+      // Empty/null transcript means STT got nothing useful.
+      // Skip the reaction entirely — a contextless reaction produces random unrelated phrases.
+      console.log("[DIALOGUE][Spin] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)");
+      console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
+    } else {
+      console.log("[DIALOGUE][Spin] ГРАВЕЦЬ:", transcript);
+      // ── Step 3: one reaction phrase ──
+      const reactionResponse = await session.createResponse({
+        instructions: buildWheelReactionPrompt(gameContext, transcript),
+        outputModalities: ["audio"],
+        maxOutputTokens: TOKENS.WHEEL_OPENING,
+      });
+      await waitForSpokenTurn(session, reactionResponse.responseId, "reaction");
+      const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+      console.log("[DIALOGUE][Spin] РЕАКЦІЯ: ", reactionText || "(no transcript)");
+      console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
+    }
   } catch {
     // Player didn't respond or timed out — skip reaction gracefully
     console.log("[DIALOGUE][Spin] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
@@ -156,8 +164,14 @@ export async function startWheelDialogue(session, systemPrompt, gameContext, {
   }
 
   // ── Done: silence. Disable mic and VAD so nothing more is said. ──
-  await session.setMonologueMode({ tools: [] });
-  session.setMicEnabled(false);
+  // Guard: READING effect may have already closed the session via closePreSession()
+  // if SPIN_DONE fired while the reaction was still in flight. Swallow the timeout.
+  try {
+    await session.setMonologueMode({ tools: [] });
+    session.setMicEnabled(false);
+  } catch {
+    // Session already closed — normal during fast SPIN_DONE transitions
+  }
   console.log("[Realtime][Spin] dialogue complete, session silenced");
 
   return null;
@@ -336,24 +350,30 @@ export async function runSessionOneFlow({
         playerResponded = true;
 
         // Capture input transcript — non-blocking, 2s timeout.
-        // Injected into the reaction prompt so the model references what was actually said.
         const transcript = await session.waitForInputTranscript(2000);
-        console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript ?? "(транскрипт не отримано)");
 
-        // Reaction: for video questions, fold "Увага на екран!" into the reaction
-        // so no separate video intro response is needed (avoids warmup context bleed).
-        const reactionInstructions = isVideo
-          ? buildWarmupReactionWithVideoCuePrompt(gameContext, transcript)
-          : buildWarmupReactionPrompt(gameContext, transcript);
-        const reactionResponse = await session.createResponse({
-          instructions: reactionInstructions,
-          outputModalities: ["audio"],
-          maxOutputTokens: TOKENS.WARMUP_REACTION,
-        });
-        await waitForSpokenTurn(session, reactionResponse.responseId, "warmup reaction");
-        const reactionText = session.getResponseTranscript(reactionResponse.responseId);
-        console.log("[DIALOGUE][Session1] РЕАКЦІЯ: ", reactionText || "(no transcript)");
-        console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+        if (!transcript) {
+          // Empty/null transcript — STT got nothing useful.
+          // Skip reaction to avoid the model producing random unrelated phrases.
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+        } else {
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript);
+          // Reaction: for video questions, fold "Увага на екран!" into the reaction
+          // so no separate video intro response is needed (avoids warmup context bleed).
+          const reactionInstructions = isVideo
+            ? buildWarmupReactionWithVideoCuePrompt(gameContext, transcript)
+            : buildWarmupReactionPrompt(gameContext, transcript);
+          const reactionResponse = await session.createResponse({
+            instructions: reactionInstructions,
+            outputModalities: ["audio"],
+            maxOutputTokens: TOKENS.WARMUP_REACTION,
+          });
+          await waitForSpokenTurn(session, reactionResponse.responseId, "warmup reaction");
+          const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+          console.log("[DIALOGUE][Session1] РЕАКЦІЯ: ", reactionText || "(no transcript)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+        }
       } catch {
         console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
         console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
@@ -399,9 +419,10 @@ export async function runSessionOneFlow({
   }
 
   // ── Regular question read: attention cue → gong → question body ───────────
+  // No persona needed — model reads exact fixed text, character adds no value here.
   await session.setMonologueMode({
     tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
+    instructions: buildVerbatimBaseInstructions(),
   });
 
   const attentionResponse = await session.createResponse({
@@ -443,9 +464,10 @@ export async function finishVideoQuestionFlow({
     );
   }
 
+  // No persona needed — model reads exact fixed time cue, character adds no value here.
   await session.setMonologueMode({
     tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
+    instructions: buildVerbatimBaseInstructions(),
   });
 
   const response = await session.createResponse({

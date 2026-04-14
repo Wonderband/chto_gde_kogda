@@ -5,6 +5,7 @@ export { RealtimeSession } from "./realtime.session.js";
 export {
   TOOL_END_ROUND,
   buildModeratorBaseInstructions,
+  buildVerbatimBaseInstructions,
   buildPostAnswerBaseInstructions,
   buildQuestionReadPrompt,
   buildAttentionCuePrompt,
