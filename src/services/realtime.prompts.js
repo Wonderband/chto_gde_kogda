@@ -477,3 +477,129 @@ export function buildQuestionBodyPrompt(gameContext) {
 `;
 }
 
+// ─── Video question cues ──────────────────────────────────────────────────────
+
+/**
+ * Prompt spoken right before the video plays for a video question.
+ * One short phrase directing attention to the screen, then silence.
+ * (Was in realtime.session1.js — moved here so all prompts are in one file.)
+ */
+export function buildWatchScreenPrompt(gameContext) {
+  const isRu = (gameContext?.game_language || "uk") !== "uk";
+  const q = gameContext?.current_question || {};
+  const pos = q.blitz_position || 1;
+
+  if (q.round_type === "blitz") {
+    const posLabel = isRu
+      ? ["Первый", "Второй", "Третий"][pos - 1] || `${pos}-й`
+      : ["Перше", "Друге", "Третє"][pos - 1] || `${pos}-е`;
+    return isRu
+      ? `ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «Внимание на экран. ${posLabel} вопрос.» Після цього одразу замовкни.`
+      : `ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «Увага на екран. ${posLabel} питання.» Після цього одразу замовкни.`;
+  }
+
+  return isRu
+    ? "ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «А теперь — внимание на экран.» Після цього одразу замовкни."
+    : "ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «А тепер — увага на екран.» Після цього одразу замовкни.";
+}
+
+/**
+ * Prompt spoken after a video question ends, launching the discussion timer.
+ * One short phrase with the time cue, then silence.
+ * (Was in realtime.session1.js — moved here so all prompts are in one file.)
+ */
+export function buildTimeCuePrompt(gameContext) {
+  const isRu = (gameContext?.game_language || "uk") !== "uk";
+  const isBlitz = gameContext?.current_question?.round_type === "blitz";
+  const line = isBlitz
+    ? isRu ? "Время! Двадцать секунд!" : "Час! Двадцять секунд!"
+    : isRu ? "Время! Минута обсуждения!" : "Час! Хвилина обговорення!";
+  return `ПОТОЧНА ФАЗА: ЗАПУСК ОБГОВОРЕННЯ ПІСЛЯ ВІДЕОПИТАННЯ. Скажи рівно одну коротку фразу: «${line}» Після цього одразу замовкни.`;
+}
+
+// ─── Listening cue ────────────────────────────────────────────────────────────
+
+/**
+ * Prompt for announcing end-of-discussion / early-answer.
+ * One phrase asking who will answer, then silence.
+ * (Was in realtime.session2.js — moved here so all prompts are in one file.)
+ */
+export function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
+  const isRu = (gameContext.game_language || "uk") !== "uk";
+  const line = earlyAnswer
+    ? isRu ? "Досрочный ответ. Кто будет отвечать?" : "Дострокова відповідь. Хто відповідатиме?"
+    : isRu ? "Время вышло. Кто будет отвечать?" : "Час вийшов. Хто відповідатиме?";
+  return `ПОТОЧНА ФАЗА: КОРОТКА РЕПЛІКА ПЕРЕД ЗАПИСОМ ВІДПОВІДІ.
+
+Скажи РІВНО ЦЮ фразу і одразу замовкни:
+«${line}»
+
+Не додавай другу фразу. Не коментуй гру. Не оголошуй правильну відповідь.`;
+}
+
+// ─── Post-answer cues (SCORING / EXPLAINING) ─────────────────────────────────
+
+/**
+ * Segue phrase bridging the name-capture moment to the explanation.
+ * Single hardcoded phrase, then silence.
+ * (Was inline in realtime.session2.js — extracted here.)
+ */
+export function buildSegueCuePrompt(gameContext = {}) {
+  const isRu = (gameContext.game_language || "uk") !== "uk";
+  const line = isRu
+    ? "А теперь — к правильному ответу."
+    : "А тепер — правильна відповідь.";
+  return `ПОТОЧНА ФАЗА: КОРОТКИЙ ПЕРЕХІД ДО ПОЯСНЕННЯ.
+
+Скажи РІВНО ЦЮ фразу і одразу замовкни:
+«${line}»
+
+Не називай відповідь. Не додавай жодного слова.`;
+}
+
+/**
+ * Reads the AI-generated explanation text verbatim, then silence.
+ * (Was inline in realtime.session2.js — extracted here.)
+ *
+ * @param {string} text — full explanation text to be spoken (from evaluation.explanation)
+ */
+export function buildExplanationCuePrompt(text) {
+  return `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
+ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПОЯСНЕННЯ — без жодного вступного слова.
+ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Okay», «Sure», «Звісно» або будь-яка інша вступна фраза.
+
+Прочитай РІВНО ЦЕ:
+«${text}»
+
+Після останнього слова — тиша. Нічого більше.`;
+}
+
+// ─── Session base instructions ────────────────────────────────────────────────
+
+/**
+ * Stripped-down base instructions for Session 2 (post-answer: SCORING / EXPLAINING).
+ * Omits wheel/warmup/sector rules that are irrelevant after the answer is given.
+ * Also removes the "don't reveal the answer" rule — Session 2 IS the reveal.
+ *
+ * Use instead of buildModeratorBaseInstructions() for playNeutralSegueCue
+ * and playExplanationCue.
+ */
+export function buildPostAnswerBaseInstructions(systemPrompt = "") {
+  const personaPrelude = extractPersonaPrelude(systemPrompt);
+  return `${personaPrelude}
+
+---
+
+ПОТОЧНА REALTIME-РОЛЬ:
+Ти — живий ведучий за ігровим столом. Зараз — фаза оголошення результату.
+
+ЖОРСТКІ ПРАВИЛА:
+1. Виконуй лише поточну фазу, вказану в instructions цього response.create.
+2. Не імпровізуй сюжет. Не вигадуй деталей поза тим, що вказано у фазі.
+3. Усі репліки мають бути короткими і сценічно точними.
+4. Ніколи не починай новий turn самостійно.
+5. Ніколи не вимовляй намірів або підтверджень («добре», «зрозуміло», «звісно»). Починай одразу з першого слова фази.
+`;
+}

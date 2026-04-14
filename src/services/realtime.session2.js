@@ -1,4 +1,11 @@
-import { buildModeratorBaseInstructions, buildNameConfirmationPrompt } from "./realtime.prompts.js";
+import {
+  buildModeratorBaseInstructions,
+  buildPostAnswerBaseInstructions,
+  buildNameConfirmationPrompt,
+  buildListeningCuePrompt,
+  buildSegueCuePrompt,
+  buildExplanationCuePrompt,
+} from "./realtime.prompts.js";
 import { TOKENS } from "../config.js";
 
 function delay(ms) {
@@ -9,23 +16,6 @@ function isRu(gameContext = {}) {
   return (gameContext.game_language || "uk") !== "uk";
 }
 
-function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
-  const ru = isRu(gameContext);
-  const line = earlyAnswer
-    ? ru
-      ? "Досрочный ответ. Кто будет отвечать?"
-      : "Дострокова відповідь. Хто відповідатиме?"
-    : ru
-    ? "Время вышло. Кто будет отвечать?"
-    : "Час вийшов. Хто відповідатиме?";
-
-  return `ПОТОЧНА ФАЗА: КОРОТКА РЕПЛІКА ПЕРЕД ЗАПИСОМ ВІДПОВІДІ.
-
-Скажи РІВНО ЦЮ фразу і одразу замовкни:
-«${line}»
-
-Не додавай другу фразу. Не коментуй гру. Не оголошуй правильну відповідь.`;
-}
 
 async function waitForCompletedSpokenTurn(
   session,
@@ -140,23 +130,13 @@ export async function playNeutralSegueCue({
   systemPrompt,
   gameContext,
 }) {
-  const ru = isRu(gameContext);
-  const line = ru
-    ? "А теперь — к правильному ответу."
-    : "А тепер — правильна відповідь.";
-
   await session.setMonologueMode({
     tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
+    instructions: buildPostAnswerBaseInstructions(systemPrompt),
   });
 
   const created = await session.createResponse({
-    instructions: `ПОТОЧНА ФАЗА: КОРОТКИЙ ПЕРЕХІД ДО ПОЯСНЕННЯ.
-
-Скажи РІВНО ЦЮ фразу і одразу замовкни:
-«${line}»
-
-Не називай відповідь. Не додавай жодного слова.`,
+    instructions: buildSegueCuePrompt(gameContext),
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "segue_cue" },
@@ -189,26 +169,15 @@ export async function playExplanationCue({
     : `Правильна відповідь: ${evaluation.correct_answer_reveal}.`;
   const text = (evaluation.explanation || fallback).trim();
 
-  // Re-anchor persona before explanation. After several prior responses in this session
-  // (listening cue, segue cue), the model can drift into assistant mode without an
-  // explicit monologue + persona reset. This also prevents "Okay, I'm here to help you"
-  // style openings seen when the model breaks character on long sessions.
+  // Re-anchor persona before explanation. After segue cue the model can drift into
+  // assistant mode without an explicit persona reset.
   await session.setMonologueMode({
     tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
+    instructions: buildPostAnswerBaseInstructions(systemPrompt),
   });
 
   const created = await session.createResponse({
-    instructions: `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
-ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗАМОВКНИ.
-
-ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПОЯСНЕННЯ — без жодного вступного слова.
-ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Okay», «Sure», «Звісно» або будь-яка інша вступна фраза.
-
-Прочитай РІВНО ЦЕ:
-«${text}»
-
-Після останнього слова — тиша. Нічого більше.`,
+    instructions: buildExplanationCuePrompt(text),
     tools: [],
     outputModalities: ["audio"],
     metadata: { stage: "explanation_cue" },

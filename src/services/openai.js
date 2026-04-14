@@ -7,6 +7,7 @@
 
 import { mockEvaluateAnswer } from './mock'
 import { EVALUATOR_MODEL, FAST_EVALUATOR_MODEL } from '../config.js'
+import { resolveCharacter } from '../data/characters.js'
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const API_URL = 'https://api.openai.com/v1/responses'
@@ -31,44 +32,16 @@ function extractOutputText(data) {
 
 // ─── Local script builder for question reading ────────────────────────────────
 
-const CHARACTER_RU = {
-  'Walter White':     { name: 'Уолтер Уайт',        city: 'Альбукерке, Нью-Мексико', desc: 'учитель химии' },
-  'Jesse Pinkman':   { name: 'Джесси Пинкман',      city: 'Альбукерке, Нью-Мексико', desc: 'уличный химик' },
-  'Saul Goodman':    { name: 'Сол Гудман',           city: 'Альбукерке, Нью-Мексико', desc: 'адвокат' },
-  'Skyler White':    { name: 'Скайлер Уайт',         city: 'Альбукерке, Нью-Мексико', desc: 'бухгалтер' },
-  'Hank Schrader':   { name: 'Хэнк Шрейдер',        city: 'Альбукерке, Нью-Мексико', desc: 'агент DEA' },
-  'Mike Ehrmantraut':{ name: 'Майк Эрмантраут',      city: 'Филадельфия',             desc: 'решатель проблем' },
-  'Gustavo Fring':   { name: 'Густаво Фринг',        city: 'Сантьяго, Чили',          desc: 'владелец Pollos Hermanos' },
-  'Jane Margolis':   { name: 'Джейн Марголис',       city: 'Альбукерке, Нью-Мексико', desc: 'художница' },
-  'Todd Alquist':    { name: 'Тодд Олквист',         city: 'Альбукерке, Нью-Мексико', desc: 'химик-самоучка' },
-  'Tuco Salamanca':  { name: 'Туко Саламанка',       city: 'Альбукерке, Нью-Мексико', desc: 'дилер наркотиків' },
-  'Gale Boetticher': { name: 'Гейл Беттикер',        city: 'Альбукерке, Нью-Мексико', desc: 'химик-лаборант' },
-  'Walter White Jr.':{ name: 'Уолтер Уайт-младший', city: 'Альбукерке, Нью-Мексико', desc: 'сын Уолтера Уайта' },
-}
-
-const CHARACTER_UK = {
-  'Walter White':     { name: 'Волтер Вайт',           city: 'Альбукерке, Нью-Мексико', desc: 'вчитель хімії' },
-  'Jesse Pinkman':   { name: 'Джессі Пінкман',         city: 'Альбукерке, Нью-Мексико', desc: 'вуличний хімік' },
-  'Saul Goodman':    { name: 'Сол Гудман',              city: 'Альбукерке, Нью-Мексико', desc: 'адвокат' },
-  'Skyler White':    { name: 'Скайлер Вайт',            city: 'Альбукерке, Нью-Мексико', desc: 'бухгалтер' },
-  'Hank Schrader':   { name: 'Генк Шрейдер',           city: 'Альбукерке, Нью-Мексико', desc: 'агент DEA' },
-  'Mike Ehrmantraut':{ name: 'Майк Ерментраут',         city: 'Філадельфія',             desc: 'вирішувач проблем' },
-  'Gustavo Fring':   { name: 'Густаво Фрінг',           city: 'Сантьяго, Чилі',          desc: 'власник Pollos Hermanos' },
-  'Jane Margolis':   { name: 'Джейн Марголіс',          city: 'Альбукерке, Нью-Мексико', desc: 'художниця' },
-  'Todd Alquist':    { name: 'Тодд Олквіст',            city: 'Альбукерке, Нью-Мексико', desc: 'хімік-самоучка' },
-  'Tuco Salamanca':  { name: 'Туко Саламанка',          city: 'Альбукерке, Нью-Мексико', desc: 'дилер наркотиків' },
-  'Gale Boetticher': { name: 'Ґейл Беттікер',           city: 'Альбукерке, Нью-Мексико', desc: 'хімік-лаборант' },
-  'Walter White Jr.':{ name: 'Волтер Вайт-молодший',   city: 'Альбукерке, Нью-Мексико', desc: 'син Волтера Вайта' },
-}
-
 const BLITZ_POS_RU = ['Первый', 'Второй', 'Третий']
 const BLITZ_POS_UK = ['Перший', 'Другий', 'Третій']
 
 function buildReadScript(gameContext) {
   const { current_question: q, game_language, sector_number } = gameContext
   const isRu = game_language !== 'uk'
-  const chars = isRu ? CHARACTER_RU : CHARACTER_UK
-  const meta = chars[q.character] || { name: q.character, city: '', desc: '' }
+  const char = resolveCharacter(q.character)
+  const meta = char
+    ? { name: isRu ? char.ruName : char.ukName, city: char.city, desc: isRu ? char.ruDesc : char.ukDesc }
+    : { name: q.character, city: '', desc: '' }
   const sector = sector_number ?? '?'
   const timeEnd = isRu ? 'Время! Минута обсуждения!' : 'Час! Хвилина обговорення!'
 

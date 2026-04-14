@@ -19,7 +19,13 @@ import {
   evaluateAnswer,
   buildListeningScript,
 } from "../services/openai";
-import { GAME_LANGUAGE, REALTIME_VOICE } from "../config.js";
+import {
+  GAME_LANGUAGE,
+  REALTIME_VOICE,
+  WHEEL_DIALOGUE_DELAY_MS,
+  VIDEO_TO_SPEECH_DELAY_MS,
+  SOUND_VOLUMES,
+} from "../config.js";
 import { playGong, playBlackBoxMusic, playLooped } from "../utils/sounds.js";
 
 const ORDINALS_UK = [
@@ -35,7 +41,9 @@ function buildRoundAnnouncementText(roundNumber, lang) {
   const n = roundNumber; // roundNumber is incremented on SPIN_DONE, so here it's the upcoming round
   const ordinals = lang === "ru" ? ORDINALS_RU : ORDINALS_UK;
   const ordinal = ordinals[n - 1] || `${n}-й`;
-  return lang === "ru" ? `Раунд ${ordinal}.` : `Раунд ${ordinal}.`;
+  return lang === "ru"
+    ? `Внимание! Мы начинаем ${ordinal} раунд!`
+    : `Увага! Ми починаємо ${ordinal} раунд!`;
 }
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
@@ -132,10 +140,10 @@ export function useGamePhaseEffects({
   const awaitingVideoEndRef = useRef(false);
   const videoFinishInFlightRef = useRef(false);
 
-  async function tts(text) {
+  async function tts(text, options = {}) {
     setTtsPlaying(true);
     try {
-      await speak(text);
+      await speak(text, options);
     } finally {
       setTtsPlaying(false);
     }
@@ -181,7 +189,7 @@ export function useGamePhaseEffects({
 
     videoFinishInFlightRef.current = true;
     setVideoReady(false); // hide backdrop before speaking — video gone first, then cue
-    await new Promise((r) => setTimeout(r, 350)); // brief pause to let backdrop exit
+    await new Promise((r) => setTimeout(r, VIDEO_TO_SPEECH_DELAY_MS)); // brief pause to let backdrop exit
 
     try {
       if (!USE_MOCK && preSessionRef.current && systemPromptRef.current) {
@@ -214,7 +222,7 @@ export function useGamePhaseEffects({
 
     (async () => {
       try {
-        await tts(announcementText);
+        await tts(announcementText, { voice: REALTIME_VOICE });
       } catch (e) {
         console.error("[ANNOUNCING] TTS failed", e);
       } finally {
@@ -231,7 +239,7 @@ export function useGamePhaseEffects({
     // Background music — plays even in mock mode; silently skipped if file absent
     const music = new Audio("/sounds/wheel-music.mp3");
     music.loop = true;
-    music.volume = 0.35;
+    music.volume = SOUND_VOLUMES.wheel;
     music.play().catch(() => {});
 
     if (
@@ -243,8 +251,6 @@ export function useGamePhaseEffects({
         music.pause();
       };
     }
-
-    const WHEEL_DELAY_MS = 4000;
 
     let cancelled = false;
 
@@ -283,7 +289,7 @@ export function useGamePhaseEffects({
             game_language: GAME_LANGUAGE,
             players: playersRef?.current || [],
           },
-          { delayMs: WHEEL_DELAY_MS }
+          { delayMs: WHEEL_DIALOGUE_DELAY_MS }
         );
 
         if (cancelled) return;
@@ -488,6 +494,42 @@ export function useGamePhaseEffects({
     };
   }, [gameState, currentQuestion]);
 
+  // ── DISCUSSING: pre-open Session 2 in the background ────────────────────────
+  // Session 2 open() is a WebRTC handshake (~3-5 s). Starting it here, while the
+  // team is discussing, means it's ready the instant TIMER_DONE fires so the
+  // moderator can speak without delay.
+  useEffect(() => {
+    if (gameState !== STATES.DISCUSSING) return;
+    if (USE_MOCK) return;
+
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    if (!apiKey || !systemPromptRef.current) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        closePostSession();
+        const session = new RealtimeSession();
+        session.onError = (err) =>
+          console.error("[Session2 pre-open error]", err.message);
+        await session.open({
+          apiKey,
+          systemPrompt: systemPromptRef.current,
+          voice: REALTIME_VOICE,
+          enableMic: true,
+        });
+        if (cancelled) { session.close(); return; }
+        postSessionRef.current = session;
+        console.log("[App][DISCUSSING] Session 2 pre-opened and ready");
+      } catch (err) {
+        console.error("[App][DISCUSSING] Session 2 pre-open failed — will open fresh in LISTENING", err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [gameState]);
+
   useEffect(() => {
     if (gameState !== STATES.LISTENING) {
       setIsRecording(false);
@@ -502,21 +544,21 @@ export function useGamePhaseEffects({
         try {
           if (state.retryCount === 0) {
             if (apiKey && systemPromptRef.current) {
-              closePostSession();
-              const session = new RealtimeSession();
-              session.onError = (err) =>
-                console.error("[Session2 cue error]", err.message);
-              await session.open({
-                apiKey,
-                systemPrompt: systemPromptRef.current,
-                voice: REALTIME_VOICE,
-                enableMic: true, // needed for captain name capture after the cue
-              });
-              if (cancelled) {
-                session.close();
-                return;
+              // Reuse pre-opened session from DISCUSSING if ready; otherwise open fresh.
+              let session = postSessionRef.current;
+              if (!session) {
+                session = new RealtimeSession();
+                session.onError = (err) =>
+                  console.error("[Session2 cue error]", err.message);
+                await session.open({
+                  apiKey,
+                  systemPrompt: systemPromptRef.current,
+                  voice: REALTIME_VOICE,
+                  enableMic: true,
+                });
+                if (cancelled) { session.close(); return; }
+                postSessionRef.current = session;
               }
-              postSessionRef.current = session;
               await playListeningCue({
                 session,
                 systemPrompt: systemPromptRef.current,
@@ -797,14 +839,14 @@ export function useGamePhaseEffects({
   // ── READY: loop pause music while waiting for next round ────────────────────
   useEffect(() => {
     if (gameState !== STATES.READY) return;
-    const { stop } = playLooped("/sounds/pause.mp3", { volume: 0.45 });
+    const { stop } = playLooped("/sounds/pause.mp3", { volume: SOUND_VOLUMES.pause });
     return stop;
   }, [gameState]);
 
   // ── GAME_OVER: loop final music until restart ────────────────────────────────
   useEffect(() => {
     if (gameState !== STATES.GAME_OVER) return;
-    const { stop } = playLooped("/sounds/final.mp3", { volume: 0.55 });
+    const { stop } = playLooped("/sounds/final.mp3", { volume: SOUND_VOLUMES.final });
     return stop;
   }, [gameState]);
 

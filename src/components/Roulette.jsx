@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { SPIN_DURATION_MS } from "../config.js";
+import { SPIN_DURATION_MS, ENVELOPE_FADE_MS, ENVELOPE_COMMIT_MS } from "../config.js";
 
 const SECTORS = 12;
 const SIZE = 620;
@@ -249,8 +249,8 @@ export default function Roulette({
         openTimerCommit.current = setTimeout(() => {
           setOpenedSectors((prev) => new Set([...prev, selectedSector]));
           setOpeningSector((cur) => cur === selectedSector ? null : cur);
-        }, 650);
-      }, 450);
+        }, ENVELOPE_COMMIT_MS);
+      }, ENVELOPE_FADE_MS);
     }
     return () => clearTimeout(openTimer.current); // only cancel the start timer
   }, [selectedSector, spinning, isAnimating]);

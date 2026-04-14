@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { STATES, EVENTS } from "../game/gameStateMachine";
+import { playTimerStartBeep, playTimerEndBeep } from "../utils/sounds";
 
 /**
  * Manages the discussion-phase countdown timer.
@@ -23,6 +24,7 @@ export function useTimer(gameState, send, timerDuration) {
         setTimerSec(next);
         if (next <= 0) {
           clearInterval(timerRef.current);
+          playTimerEndBeep();
           send(EVENTS.TIMER_DONE);
         }
       }, 1000);
@@ -36,6 +38,7 @@ export function useTimer(gameState, send, timerDuration) {
       timerSecRef.current = timerDuration;
       setTimerSec(timerDuration);
       setPaused(false);
+      playTimerStartBeep();
     }
   }, [gameState]);
 

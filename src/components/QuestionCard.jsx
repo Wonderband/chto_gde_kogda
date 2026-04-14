@@ -1,17 +1,5 @@
-const CHARACTER_META = {
-  'Walter White':     { city: 'Альбукерке, Нью-Мексико', img: '/characters/walter.jpg', desc: 'вчитель хімії' },
-  'Jesse Pinkman':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/jesse.jpg',  desc: 'вуличний хімік' },
-  'Saul Goodman':    { city: 'Альбукерке, Нью-Мексико', img: '/characters/saul.jpg',   desc: 'адвокат' },
-  'Skyler White':    { city: 'Альбукерке, Нью-Мексико', img: '/characters/skyler.jpg', desc: 'бухгалтер' },
-  'Hank Schrader':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/hank.jpg',   desc: 'агент DEA' },
-  'Mike Ehrmantraut':{ city: 'Філадельфія',              img: '/characters/mike.jpg',   desc: 'фіксер' },
-  'Gustavo Fring':   { city: 'Сантьяго, Чилі',          img: '/characters/gus.jpg',    desc: 'власник Pollos Hermanos' },
-  'Jane Margolis':   { city: 'Альбукерке, Нью-Мексико', img: '/characters/jane.jpg',   desc: 'художниця' },
-  'Todd Alquist':    { city: 'Альбукерке, Нью-Мексико', img: '/characters/todd.jpg',   desc: 'хімік-самоучка' },
-  'Tuco Salamanca':  { city: 'Альбукерке, Нью-Мексико', img: '/characters/tuco.jpg',   desc: 'дилер наркотиків' },
-  'Gale Boetticher': { city: 'Альбукерке, Нью-Мексико', img: '/characters/gale.jpg',   desc: 'хімік-лаборант' },
-  'Walter White Jr.':{ city: 'Альбукерке, Нью-Мексико', img: '/characters/flynn.jpg',  desc: 'син Волтера Вайта' },
-}
+import { GAME_LANGUAGE } from '../config.js'
+import { resolveCharacter } from '../data/characters.js'
 
 const ROUND_LABELS = {
   standard: 'Стандартний раунд',
@@ -20,13 +8,14 @@ const ROUND_LABELS = {
   black_box: 'Чорний ящик',
 }
 
-import { GAME_LANGUAGE } from '../config.js'
-
 export default function QuestionCard({ question, evaluation, hideText = false }) {
   if (!question) return null
 
   const qText = GAME_LANGUAGE === 'uk' ? question.question_uk : question.question_ru
-  const meta = CHARACTER_META[question.character] || { city: 'Невідоме місто', img: null, desc: '' }
+  const char = resolveCharacter(question.character)
+  const meta = char
+    ? { city: char.city, img: char.img, desc: char.ukDesc }
+    : { city: 'Невідоме місто', img: null, desc: '' }
   const roundLabel = ROUND_LABELS[question.round_type] || question.round_type
 
   return (
