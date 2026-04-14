@@ -35,7 +35,13 @@ function isVideoQuestion(gameContext) {
 
 
 async function waitForCompletedSpokenTurn(session, responseId, label) {
-  const doneEvent = await session.waitForResponseDone(responseId, 60000);
+  // Register BOTH waiters upfront — output_audio_buffer.stopped can arrive
+  // before response.done on the wire. If we only register waitForAudioStopped
+  // after awaiting waitForResponseDone, the event may already be gone.
+  const doneProm = session.waitForResponseDone(responseId, 60000);
+  const audioProm = session.waitForAudioStopped(responseId, 60000);
+
+  const doneEvent = await doneProm;
   const status = getResponseStatus(doneEvent);
   const reason = getStatusReason(doneEvent);
 
@@ -45,7 +51,7 @@ async function waitForCompletedSpokenTurn(session, responseId, label) {
     reason,
   });
 
-  await session.waitForAudioStopped(responseId, 60000);
+  await audioProm;
   console.log(`[Realtime][Session1] ${label} output audio stopped`, {
     responseId,
     status,
@@ -71,8 +77,12 @@ async function waitForCompletedSpokenTurn(session, responseId, label) {
 /** Lenient wait for a spoken turn — doesn't throw on non-completed status. */
 async function waitForSpokenTurn(session, responseId, label) {
   try {
-    await session.waitForResponseDone(responseId, 20000);
-    await session.waitForAudioStopped(responseId, 10000);
+    // Register BOTH waiters upfront — output_audio_buffer.stopped can arrive
+    // before response.done. Sequential registration risks missing the audio event.
+    const doneProm = session.waitForResponseDone(responseId, 20000);
+    const audioProm = session.waitForAudioStopped(responseId, 30000);
+    await doneProm;
+    await audioProm;
     await delay(300);
   } catch (err) {
     console.warn(`[Realtime][Spin] ${label} wait interrupted:`, err?.message);
