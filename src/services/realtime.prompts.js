@@ -103,7 +103,7 @@ export function buildWheelOpeningPrompt(gameContext) {
       : scoreDiff >= 2
       ? `Знатоки ведут ${scoreExperts}:${scoreViewers}. Похвали команду — но не давай расслабляться.`
       : scoreDiff <= -2
-      ? `Телезрители ведут ${scoreViewers}:${scoreExperts}. Поддержи знатоков — добавь тепла и веры в них.`
+      ? `Герои сериала ведут ${scoreViewers}:${scoreExperts}. Поддержи знатоков — добавь тепла и веры в них.`
       : Math.max(scoreExperts, scoreViewers) >= 4
       ? `Счёт ${scoreExperts}:${scoreViewers} — развязка близко. Напряжение максимальное.`
       : `Счёт ${scoreExperts}:${scoreViewers}. Борьба идёт ровно — ${totalRoundsPlayed} ${
@@ -114,7 +114,7 @@ export function buildWheelOpeningPrompt(gameContext) {
     : scoreDiff >= 2
     ? `Знавці ведуть ${scoreExperts}:${scoreViewers}. Похвали команду — але не давай розслаблятись.`
     : scoreDiff <= -2
-    ? `Телеглядачі ведуть ${scoreViewers}:${scoreExperts}. Підтримай знавців — додай тепла і впевненості в них.`
+    ? `Герої серіалу ведуть ${scoreViewers}:${scoreExperts}. Підтримай знавців — додай тепла і впевненості в них.`
     : Math.max(scoreExperts, scoreViewers) >= 4
     ? `Рахунок ${scoreExperts}:${scoreViewers} — розв'язка близько. Напруга максимальна.`
     : `Рахунок ${scoreExperts}:${scoreViewers}. Боротьба йде рівно — ${totalRoundsPlayed} ${

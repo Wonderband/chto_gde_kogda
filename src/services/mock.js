@@ -37,9 +37,9 @@ const CORRECT_PHRASES = [
 
 const WRONG_PHRASES = [
   (answer, score) =>
-    `На жаль, це неправильна відповідь. Правильна відповідь — ${answer}. Очко отримують телеглядачі. Рахунок ${score.experts}:${score.viewers + 1}.`,
+    `На жаль, це неправильна відповідь. Правильна відповідь — ${answer}. Очко отримують Герої серіалу. Рахунок ${score.experts}:${score.viewers + 1}.`,
   (answer, score) =>
-    `Ні. Правильна відповідь — ${answer}. Телеглядачі заробляють очко. Рахунок ${score.experts}:${score.viewers + 1}.`,
+    `Ні. Правильна відповідь — ${answer}. Герої серіалу заробляють очко. Рахунок ${score.experts}:${score.viewers + 1}.`,
 ]
 
 export async function mockEvaluateAnswer(context) {

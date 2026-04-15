@@ -9,8 +9,8 @@ export default function QuestionVideoPlayer({ question, onEnded }) {
   const poster = question?.video_poster || "";
   const title =
     GAME_LANGUAGE === "ru"
-      ? `Видеовопрос от ${question?.character || "телезрителя"}`
-      : `Відеозапитання від ${question?.character || "телеглядача"}`;
+      ? `Видеовопрос от ${question?.character || "Героя сериала"}`
+      : `Відеозапитання від ${question?.character || "Героя серіалу"}`;
   const hint =
     GAME_LANGUAGE === "ru"
       ? "Вопрос прозвучит с экрана. После ролика начнётся обсуждение."

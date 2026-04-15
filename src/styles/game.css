@@ -54,32 +54,20 @@
   animation: rec-blink 1.2s ease-in-out infinite;
 }
 .round-counter {
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-family: Georgia, serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-gold);
+  border: 1px solid rgba(201,168,76,0.35);
+  padding: 0.15rem 0.6rem;
+  border-radius: 2px;
+  background: rgba(201,168,76,0.06);
 }
 
-/* ── IDLE ── */
-.roulette-overlay-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 1rem;
-  text-align: center;
-}
-.idle-title {
-  font-size: var(--font-display);
-  color: var(--accent-gold);
-  font-family: Georgia, serif;
-  letter-spacing: 0.25em;
-  font-weight: normal;
-}
-.idle-subtitle {
-  font-size: var(--font-label);
-  color: var(--text-secondary);
-  letter-spacing: 0.1em;
-}
 .idle-hint-key {
   font-size: 0.88rem;
   color: var(--text-secondary);
@@ -194,10 +182,14 @@
   color: var(--score-viewers);
 }
 .gameover-motto {
-  font-size: var(--font-title);
+  font-size: var(--font-label);
   color: var(--accent-gold);
   font-style: italic;
-  opacity: 0.8;
+  opacity: 0.7;
+  letter-spacing: 0.08em;
+}
+.gameover-loss .gameover-motto {
+  color: rgba(120,140,160,0.7);
 }
 .gameover-hint {
   font-size: var(--font-label);
@@ -211,6 +203,137 @@
   background: rgba(201, 168, 76, 0.08);
   color: var(--accent-gold);
   font-family: monospace;
+}
+
+/* ── BB Periodic-Table Tile styles (IDLE screen) ── */
+.bb-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.6rem;
+}
+
+.bb-tile {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border: 2px solid rgba(56,163,56,0.7);
+  border-radius: 3px;
+  background: rgba(4,20,4,0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 10px rgba(56,163,56,0.25), inset 0 0 6px rgba(0,0,0,0.6);
+  transition: box-shadow 0.3s ease;
+}
+.bb-tile-highlight {
+  border-color: rgba(56,200,56,0.9);
+  background: rgba(4,30,4,0.95);
+}
+.bb-tile-letter {
+  font-family: Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #f0ead6;
+  line-height: 1;
+}
+.bb-tile-highlight .bb-tile-letter {
+  color: #4de84d;
+}
+.bb-tile-num {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 0.5rem;
+  font-family: monospace;
+  color: rgba(56,200,56,0.7);
+  line-height: 1;
+}
+.bb-tile-sep {
+  font-family: Georgia, serif;
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: rgba(201,168,76,0.6);
+  width: 22px;
+  text-align: center;
+  line-height: 52px;
+}
+.bb-tile-gap {
+  width: 8px;
+}
+
+/* Decorative BB chemical labels on game screen */
+.bb-chem-deco {
+  position: absolute;
+  font-family: monospace;
+  font-size: 0.68rem;
+  color: rgba(56,163,56,0.06);
+  pointer-events: none;
+  user-select: none;
+  letter-spacing: 0.05em;
+  z-index: 0;
+}
+
+/* ── GAME OVER — shared ── */
+.gameover-win,
+.gameover-loss {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── GAME OVER — experts win (celebration) ── */
+.gameover-win {
+  background: radial-gradient(ellipse at 50% 120%, rgba(30,100,30,0.35) 0%, transparent 65%);
+}
+
+/* Confetti pieces */
+.confetti-piece {
+  position: absolute;
+  top: -20px;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: confetti-fall var(--cf-dur, 3s) var(--cf-delay, 0s) ease-in infinite,
+             confetti-sway calc(var(--cf-dur, 3s) * 0.6) var(--cf-delay, 0s) ease-in-out infinite;
+}
+
+/* Firework burst */
+.firework {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow:
+    0 -50px 0 2px var(--fw-color, #5ab85a),
+    0  50px 0 2px var(--fw-color, #5ab85a),
+    -50px 0 0 2px var(--fw-color, #5ab85a),
+    50px  0 0 2px var(--fw-color, #5ab85a),
+    -36px -36px 0 2px var(--fw-color, #c9a84c),
+    36px  -36px 0 2px var(--fw-color, #c9a84c),
+    -36px  36px 0 2px var(--fw-color, #c9a84c),
+    36px   36px 0 2px var(--fw-color, #c9a84c);
+  animation: firework-burst var(--fw-dur, 1.6s) var(--fw-delay, 0s) ease-out infinite;
+}
+
+/* ── GAME OVER — viewers win (gloomy) ── */
+.gameover-loss {
+  background: linear-gradient(180deg, #050a10 0%, #080a0a 50%, #050505 100%);
+}
+
+/* Rain drops */
+.rain-drop {
+  position: absolute;
+  top: -20px;
+  width: 1.5px;
+  height: 22px;
+  background: linear-gradient(180deg, rgba(120,160,210,0) 0%, rgba(120,160,210,0.55) 100%);
+  border-radius: 1px;
+  animation: rain-fall var(--rd-dur, 1s) var(--rd-delay, 0s) linear infinite;
 }
 
 /* ── Video question backdrop ── */

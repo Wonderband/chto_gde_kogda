@@ -137,11 +137,90 @@ function Envelope({ number, fading }) {
   );
 }
 
+function BlitzEnvelope({ fading }) {
+  return (
+    <g
+      style={{
+        opacity: fading ? 0 : 1,
+        transition: fading ? "opacity 0.55s ease-in" : "none",
+      }}
+    >
+      {/* Main envelope body */}
+      <rect
+        x={-ENV_W / 2}
+        y={-ENV_H / 2}
+        width={ENV_W}
+        height={ENV_H}
+        rx="4"
+        ry="4"
+        fill="url(#blitzEnvGrad)"
+        stroke="rgba(160,20,20,0.7)"
+        strokeWidth="1.5"
+        filter="url(#envShadow)"
+      />
+      {/* Envelope flap crease */}
+      <polyline
+        points={`${-ENV_W / 2},${-ENV_H / 2} 0,${-ENV_H * 0.05} ${ENV_W / 2},${-ENV_H / 2}`}
+        fill="none"
+        stroke="rgba(130,20,20,0.4)"
+        strokeWidth="0.9"
+      />
+      {/* Red ribbon — diagonal strips */}
+      <line
+        x1={-ENV_W / 2 + 8}
+        y1={-ENV_H / 2}
+        x2={ENV_W / 2 - 8}
+        y2={ENV_H / 2}
+        stroke="#c01010"
+        strokeWidth="7"
+        strokeLinecap="round"
+        opacity="0.8"
+      />
+      <line
+        x1={ENV_W / 2 - 8}
+        y1={-ENV_H / 2}
+        x2={-ENV_W / 2 + 8}
+        y2={ENV_H / 2}
+        stroke="#c01010"
+        strokeWidth="7"
+        strokeLinecap="round"
+        opacity="0.8"
+      />
+      {/* White backing for text legibility */}
+      <rect
+        x={-28}
+        y={-14}
+        width={56}
+        height={28}
+        rx="3"
+        fill="rgba(245,235,220,0.92)"
+      />
+      {/* БЛІЦ label */}
+      <text
+        x="0"
+        y="1"
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize="17"
+        fontWeight="bold"
+        fontFamily="Georgia,'Times New Roman',serif"
+        fill="#b00000"
+        stroke="rgba(60,0,0,0.2)"
+        strokeWidth="0.4"
+        style={{ userSelect: "none", letterSpacing: "0.06em" }}
+      >
+        БЛІЦ
+      </text>
+    </g>
+  );
+}
+
 export default function Roulette({
   spinning,
   onStop,
   onTarget,
   selectedSector,
+  blitzSectors,
   durationMs = SPIN_DURATION_MS,
 }) {
   const [arrowAngle, setArrowAngle] = useState(0);
@@ -286,6 +365,10 @@ export default function Roulette({
                 <stop offset="0%" stopColor="#f9f7f0" />
                 <stop offset="100%" stopColor="#e4ddc6" />
               </linearGradient>
+              <linearGradient id="blitzEnvGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#fff8f4" />
+                <stop offset="100%" stopColor="#f0e0d8" />
+              </linearGradient>
               <radialGradient id="hubBase" cx="50%" cy="50%" r="50%">
                 <stop offset="0%" stopColor="#1c1c1c" />
                 <stop offset="100%" stopColor="#050505" />
@@ -334,6 +417,7 @@ export default function Roulette({
               const ep = polar(ENV_R, mid);
               const isOpened = openedSectors.has(i);
               const isOpening = openingSector === i;
+              const isBlitz = blitzSectors instanceof Set && blitzSectors.has(i);
 
               return (
                 <g key={i}>
@@ -354,7 +438,10 @@ export default function Roulette({
                         mid + 90
                       })`}
                     >
-                      <Envelope number={i + 1} fading={isOpening} />
+                      {isBlitz
+                        ? <BlitzEnvelope fading={isOpening} />
+                        : <Envelope number={i + 1} fading={isOpening} />
+                      }
                     </g>
                   )}
                 </g>
