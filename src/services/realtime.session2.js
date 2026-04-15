@@ -118,7 +118,23 @@ export async function playListeningCue({
     console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження):", confirmText || "(no transcript)");
     console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
   } catch {
-    console.log("[DIALOGUE][Session2] капітан не відповів — підтвердження пропущено");
+    console.log("[DIALOGUE][Session2] капітан не відповів — вимовляємо fallback");
+    // Players need an audible signal that recording is about to start.
+    // Say "Слухаємо вас!" (same as the no-name path in buildNameConfirmationPrompt)
+    // so they know to begin speaking their answer.
+    try {
+      await session.setMonologueMode({ tools: [] });
+      const fallback = await session.createResponse({
+        instructions: buildNameConfirmationPrompt(gameContext, null),
+        outputModalities: ["audio"],
+        maxOutputTokens: TOKENS.NAME_CONFIRM,
+      });
+      await waitForCompletedSpokenTurn(session, fallback.responseId, "name confirm fallback", 10000);
+      console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження): Слухаємо вас!");
+      console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+    } catch (fallbackErr) {
+      console.warn("[DIALOGUE][Session2] name confirm fallback failed:", fallbackErr?.message);
+    }
   }
 
   // Disable mic before control returns — recording starts its own getUserMedia stream.

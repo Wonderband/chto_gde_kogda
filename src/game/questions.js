@@ -9,8 +9,26 @@ export function shuffleQuestions(questions) {
   return arr
 }
 
+/**
+ * Returns one question per wheel sector (12 slots).
+ * Blitz sub-questions (position > 1) are excluded — they are loaded on-demand
+ * via getBlitzSubQuestions when a blitz round fires.
+ */
 export function loadQuestions() {
-  return shuffleQuestions(allQuestions)
+  const slotQuestions = allQuestions.filter(
+    (q) => !q.blitz_position || q.blitz_position === 1
+  )
+  return shuffleQuestions(slotQuestions)
+}
+
+/**
+ * Returns all questions belonging to the given blitz group, sorted by position.
+ * Used by the reducer when a blitz round fires to load Q2/Q3 into blitzQueue.
+ */
+export function getBlitzSubQuestions(blitzGroup) {
+  return allQuestions
+    .filter((q) => q.blitz_group === blitzGroup)
+    .sort((a, b) => (a.blitz_position || 0) - (b.blitz_position || 0))
 }
 
 export function getQuestionById(id) {

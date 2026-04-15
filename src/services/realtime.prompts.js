@@ -275,6 +275,7 @@ export function buildCombinedIntroPrompt(gameContext) {
   const flavor = q.intro_flavor || "";
   const isBlackBox = q.round_type === "black_box";
   const isBlitz = q.round_type === "blitz";
+  const isItemAnnounce = !!q.item_to_announce;
   const blackBoxCue = isRu ? "Внимание, чёрный ящик!" : "Увага, чорний ящик!";
   const character =
     q.character || (isRu ? "Неизвестный персонаж" : "Невідомий персонаж");
@@ -330,6 +331,21 @@ export function buildCombinedIntroPrompt(gameContext) {
 
 Оголоси сектор і в ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
 Наприкінці скажи РІВНО: «${blackBoxCue}» — і замовкни.
+
+Разом: максимум 2 речення. Мова: ${isRu ? "російська" : "українська"}.
+`;
+  }
+
+  if (isItemAnnounce) {
+    // Item announce: ends with the item cue phrase; intro_flavor is read AFTER music.
+    const itemCue = q.item_to_announce;
+    return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО РАУНДУ.
+
+ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
+ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
+
+Оголоси сектор і в ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
+Наприкінці скажи РІВНО: «${itemCue}» — і замовкни.
 
 Разом: максимум 2 речення. Мова: ${isRu ? "російська" : "українська"}.
 `;
@@ -527,16 +543,12 @@ export function buildBlackBoxWarmupOpeningPrompt(gameContext) {
 
 export function buildAttentionCuePrompt(gameContext) {
   const attention = attentionLineForQuestion(gameContext);
-  return `ПОПЕРЕДНІЙ ДІАЛОГ ЗАВЕРШЕНО. Ти більше НЕ в розмові з гравцями. Будь-який попередній обмін репліками не має значення і НЕ повинен впливати на цю репліку.
-
-ПОТОЧНА ФАЗА: ОДНА РЕПЛІКА — УВАГА.
-
-ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ОГОЛОШЕННЯ.
-ЗАБОРОНЕНО: продовжувати попередню розмову. ЗАБОРОНЕНО: будь-яка вступна або підтверджувальна фраза.
+  return `НОВА ФАЗА. ІГНОРУЙ ВСЕ ПОПЕРЕДНЄ.
 
 Скажи РІВНО: «${attention}»
 
-Одразу замовкни. Нічого не кажи після цієї фрази.
+Одразу замовкни. Більше нічого — ні слова до, ні слова після.
+ЗАБОРОНЕНО: продовжувати попередню розмову в будь-якій формі.
 `;
 }
 
@@ -686,8 +698,9 @@ export function buildExplanationCuePrompt(text) {
  * Saves ~2,100 tokens vs buildModeratorBaseInstructions on every call.
  */
 export function buildVerbatimBaseInstructions() {
-  return `Ти — ведучий телевізійної гри. Зараз ти зачитуєш текст дослівно.
-ПРАВИЛА: Починай одразу з першого слова. Без вступних фраз. Без імпровізації. Без коментарів після тексту.`;
+  return `ПОПЕРЕДНЯ РОЗМОВА ЗАВЕРШЕНА. Ти БІЛЬШЕ НЕ ведучий у діалозі.
+Ти — система озвучення: вимовляєш ТІЛЬКИ текст з instructions поточного response і одразу замовкаєш.
+ЗАБОРОНЕНО: відповідати на будь-що зі попередньої розмови; будь-яка фраза крім вказаного тексту; вступні слова; коментарі після тексту.`;
 }
 
 export function buildPostAnswerBaseInstructions(systemPrompt = "") {
