@@ -206,10 +206,11 @@ function Game() {
     currentQuestion,
   });
 
-  // Compute which sectors have blitz questions (best-effort: index in initial shuffled queue)
+  // Compute which sectors have blitz questions.
+  // state.questions is a 12-slot sparse array (nulls for played sectors) — use optional chaining.
   const blitzSectors = new Set(
     (state.questions || [])
-      .map((q, i) => (q.blitz_position === 1 ? i : -1))
+      .map((q, i) => (q?.blitz_position === 1 ? i : -1))
       .filter((i) => i !== -1)
   );
 

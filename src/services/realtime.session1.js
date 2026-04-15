@@ -199,8 +199,9 @@ export async function runSessionOneFlow({
 }) {
   const isVideo = isVideoQuestion(gameContext);
   const isBlackBox = gameContext?.current_question?.round_type === "black_box";
-  // Skip warmup for black_box — music plays immediately after combined intro
-  const hasFlavor = !!gameContext?.current_question?.intro_flavor && !isBlackBox;
+  const isItemAnnounce = !!gameContext?.current_question?.item_to_announce;
+  // Skip warmup for black_box/item_announce — music plays immediately after combined intro
+  const hasFlavor = !!gameContext?.current_question?.intro_flavor && !isBlackBox && !isItemAnnounce;
   const blitzPos = gameContext?.current_question?.blitz_position || 1;
   const isBlitzContinuation =
     gameContext?.current_question?.round_type === "blitz" && blitzPos > 1;
@@ -298,6 +299,8 @@ export async function runSessionOneFlow({
             maxOutputTokens: TOKENS.WARMUP_REACTION,
           });
           await waitForSpokenTurn(session, reactionResponse.responseId, "black box warmup reaction");
+          session.setMicEnabled(false);
+          session.clearInputBuffer();
           const reactionText = session.getResponseTranscript(reactionResponse.responseId);
           console.log("[DIALOGUE][Session1] РЕАКЦІЯ:", reactionText || "(no transcript)");
           console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
@@ -336,20 +339,115 @@ export async function runSessionOneFlow({
       return { awaitVideoEnd: true };
     }
 
-    // ── Warmup dialogue — only when intro_flavor exists (non-black_box) ───
+    // ── Item announce flow: music → warmup dialogue → "Увага на екран!" → gong → video ──
+    // Triggered by item_to_announce field on the question (e.g. "Увага! Склянка з водою").
+    // The combined intro already said the item cue; now music plays while the item is brought in.
+    if (isItemAnnounce) {
+      console.log("[Realtime][Session1] item announce: playing music");
+      await playBlackBoxMusic();
+      console.log("[Realtime][Session1] item announce: music done, starting warmup");
+
+      const itemFlavor = gameContext?.current_question?.intro_flavor;
+
+      if (itemFlavor) {
+        await session.setDialogueMode({
+          tools: [],
+          instructions: buildModeratorBaseInstructions(systemPrompt),
+          silenceDurationMs: 1500,
+          interruptResponse: false,
+          createResponse: false,
+        });
+        session.clearInputBuffer();
+
+        const openingResponse = await session.createResponse({
+          instructions: buildBlackBoxWarmupOpeningPrompt(gameContext),
+          outputModalities: ["audio"],
+          metadata: { stage: "item_announce_warmup_opening" },
+          maxOutputTokens: TOKENS.COMBINED_INTRO,
+        });
+        console.log("[Realtime][Session1] item announce warmup opening created", { responseId: openingResponse.responseId });
+        await waitForSpokenTurn(session, openingResponse.responseId, "item announce warmup opening");
+        const openingText = session.getResponseTranscript(openingResponse.responseId);
+        console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (item announce вступ):", openingText || "(no transcript)");
+
+        let playerResponded = false;
+        try {
+          await session.waitForUserSpeechStart(8000);
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (говорить...)");
+          await session.waitForUserSpeechStop(20000);
+          await delay(500);
+          playerResponded = true;
+
+          const transcript = await session.waitForInputTranscript(2000);
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript || "(транскрипт не отримано)");
+
+          if (!transcript) {
+            playerResponded = false;
+          } else {
+            const reactionResponse = await session.createResponse({
+              instructions: buildWarmupReactionWithVideoCuePrompt(gameContext, transcript),
+              outputModalities: ["audio"],
+              maxOutputTokens: TOKENS.WARMUP_REACTION,
+            });
+            await waitForSpokenTurn(session, reactionResponse.responseId, "item announce warmup reaction");
+            session.setMicEnabled(false);
+            session.clearInputBuffer();
+            const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+            console.log("[DIALOGUE][Session1] РЕАКЦІЯ:", reactionText || "(no transcript)");
+            console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+          }
+        } catch {
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+        }
+
+        await session.setMonologueMode({ tools: [] });
+
+        if (!playerResponded) {
+          const cueResponse = await session.createResponse({
+            instructions: buildWatchScreenPrompt(gameContext),
+            outputModalities: ["audio"],
+            metadata: { stage: "item_announce_video_cue" },
+            maxOutputTokens: TOKENS.VIDEO_CUE,
+          });
+          await waitForSpokenTurn(session, cueResponse.responseId, "item announce video cue fallback");
+        }
+      } else {
+        // No flavor: just "Увага на екран!" after music
+        const cueResponse = await session.createResponse({
+          instructions: buildWatchScreenPrompt(gameContext),
+          outputModalities: ["audio"],
+          metadata: { stage: "item_announce_video_cue" },
+          maxOutputTokens: TOKENS.VIDEO_CUE,
+        });
+        console.log("[Realtime][Session1] item announce video cue created", { responseId: cueResponse.responseId });
+        await waitForSpokenTurn(session, cueResponse.responseId, "item announce video cue");
+      }
+
+      await playGong();
+      return { awaitVideoEnd: true };
+    }
+
+    // ── Warmup dialogue — only when intro_flavor exists (non-black_box, non-item_announce) ───
     if (hasFlavor) {
       console.log("[Realtime][Session1] warmup dialogue start");
 
-      // Switch to dialogue mode: 1500ms silence threshold so players can pause
-      // mid-thought without being cut off (700ms used in wheel banter is too short).
+      // Mirror the spinning dialogue cleanup pattern:
+      // 1. Mute mic during mode switch so no ambient noise bleeds into VAD
+      // 2. Use 700ms silence (same as spinning) — 1500ms captured too much ambient
+      //    noise, which produced garbled transcripts and context-contaminated reactions
+      // 3. Clear buffer, then unmute mic with a small server-settle delay
+      session.setMicEnabled(false);
       await session.setDialogueMode({
         tools: [],
         instructions: buildModeratorBaseInstructions(systemPrompt),
-        silenceDurationMs: 1500,
+        silenceDurationMs: 700,
         interruptResponse: false,
         createResponse: false,
       });
       session.clearInputBuffer();
+      await delay(300); // let server process mode-switch before mic goes live
+      session.setMicEnabled(true);
 
       let playerResponded = false;
       try {
@@ -380,6 +478,11 @@ export async function runSessionOneFlow({
             maxOutputTokens: TOKENS.WARMUP_REACTION,
           });
           await waitForSpokenTurn(session, reactionResponse.responseId, "warmup reaction");
+          // Mute mic immediately after reaction — VAD is still live at this point and any
+          // additional player speech (e.g. "Дуже добре.") would enter the session context
+          // and contaminate the attention cue / question read that follows.
+          session.setMicEnabled(false);
+          session.clearInputBuffer();
           const reactionText = session.getResponseTranscript(reactionResponse.responseId);
           console.log("[DIALOGUE][Session1] РЕАКЦІЯ: ", reactionText || "(no transcript)");
           console.log("[DIALOGUE][Session1] ──────────────────────────────────────");

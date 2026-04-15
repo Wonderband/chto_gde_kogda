@@ -28,7 +28,7 @@ export function useRoulette(gameState, send, graceClosePreSession) {
       console.log("[App][Roulette stop]", { sector });
       await graceClosePreSession();
       setSelectedSector(sector);
-      send(EVENTS.SPIN_DONE);
+      send(EVENTS.SPIN_DONE, { sector });
     },
     [send, graceClosePreSession]
   );

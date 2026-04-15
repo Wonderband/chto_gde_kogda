@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useCallback } from "react";
 import { STATES, EVENTS } from "./gameStateMachine";
-import { loadQuestions } from "./questions";
+import { loadQuestions, getBlitzSubQuestions } from "./questions";
 import { WINNING_SCORE } from "../config.js";
 
 const initialState = {
@@ -43,24 +43,29 @@ function reducer(state, action) {
       return { ...initialState };
 
     case EVENTS.SPIN_DONE: {
-      const [first, ...remaining] = state.questions;
+      const sector = action.payload?.sector ?? 0;
+      const first = state.questions[sector];
 
-      // Blitz: collect all sub-questions from the same group, sorted by position
+      if (!first) {
+        // Guard: should not happen since the wheel skips opened sectors
+        console.warn("[GameContext][SPIN_DONE] No question at sector", sector);
+        return state;
+      }
+
+      // Null out this sector slot — preserves all other sector indices
+      const questionsAfter = state.questions.map((q, i) => (i === sector ? null : q));
+
+      // Blitz: load Q2/Q3 from the source data (they are not in state.questions)
       if (first?.round_type === "blitz") {
-        const group = first.blitz_group;
-        const sameGroup = remaining.filter((q) => q.blitz_group === group);
-        const blitzAll = [first, ...sameGroup].sort(
-          (a, b) => (a.blitz_position || 0) - (b.blitz_position || 0)
-        );
-        const blitzQueue = blitzAll.slice(1);
-        const questionsLeft = remaining.filter((q) => q.blitz_group !== group);
+        const allInGroup = getBlitzSubQuestions(first.blitz_group);
+        const blitzQueue = allInGroup.filter((q) => q.blitz_position > 1);
 
         return {
           ...state,
           gameState: STATES.READING,
-          currentQuestion: blitzAll[0],
+          currentQuestion: first,
           blitzQueue,
-          questions: questionsLeft,
+          questions: questionsAfter,
           roundNumber: state.roundNumber + 1,
           transcript: "",
           evaluation: null,
@@ -75,7 +80,7 @@ function reducer(state, action) {
         gameState: STATES.READING,
         currentQuestion: first,
         blitzQueue: [],
-        questions: remaining,
+        questions: questionsAfter,
         roundNumber: state.roundNumber + 1,
         transcript: "",
         evaluation: null,
