@@ -268,7 +268,7 @@ export async function evaluateAnswerFast(transcript, question) {
       correct: false,
       score_delta: 1,
       who_scores: "viewers",
-      moderator_phrase: "Ответ не принят. Очко получает телезритель.",
+      moderator_phrase: "Ответ не принят. Очко получает Герой сериала.",
       correct_answer_reveal: question.correct_answer,
     };
   }

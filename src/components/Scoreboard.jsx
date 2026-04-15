@@ -39,17 +39,16 @@ export default function Scoreboard() {
 
       {/* ── Centre title ── */}
       <div className="sb-center">
-        <div className="sb-title-ru">ЧТО? ГДЕ? КОГДА?</div>
-        <div className="sb-title-uk">ЩО? ДЕ? КОЛИ?</div>
-        <div className="sb-colon">:</div>
+        <div className="sb-game-title">ЩО? ДЕ? КОЛИ?</div>
+        <div className="sb-game-sub">Breaking Bad Edition</div>
       </div>
 
-      {/* ── ТЕЛЕЗРИТЕЛИ (right) ── */}
+      {/* ── ГЕРОЇ СЕРІАЛУ (right) ── */}
       <div className="team-panel viewers-panel">
         <div className="team-scores">
           <ScoreDigit value={score.viewers} color="var(--score-viewers)" />
         </div>
-        <div className="team-label">ТЕЛЕГЛЯДАЧІ</div>
+        <div className="team-label">ГЕРОЇ СЕРІАЛУ</div>
       </div>
 
       <style>{`
@@ -63,7 +62,7 @@ export default function Scoreboard() {
             0 4px 32px rgba(0,0,0,0.9),
             inset 0 1px 0 rgba(201,168,76,0.15);
           flex-shrink: 0;
-          height: 90px;
+          height: 108px;
         }
 
         /* ── Team panel ── */
@@ -185,19 +184,29 @@ export default function Scoreboard() {
         }
         .sb-title-uk {
           font-family: Georgia, serif;
-          font-size: 0.88rem;
-          letter-spacing: 0.3em;
-          color: rgba(201,168,76,0.85);
+          font-size: 0.95rem;
+          letter-spacing: 0.32em;
+          color: rgba(201,168,76,0.9);
           text-transform: uppercase;
           white-space: nowrap;
         }
-        .sb-colon {
+        .sb-game-title {
           font-family: Georgia, serif;
-          font-size: 2.4rem;
-          font-weight: bold;
-          color: rgba(201,168,76,0.6);
-          line-height: 1;
-          margin-top: 0.1rem;
+          font-size: 1.55rem;
+          letter-spacing: 0.28em;
+          color: rgba(201,168,76,0.9);
+          text-transform: uppercase;
+          white-space: nowrap;
+          line-height: 1.15;
+        }
+        .sb-game-sub {
+          font-family: Georgia, serif;
+          font-size: 0.72rem;
+          letter-spacing: 0.22em;
+          color: rgba(201,168,76,0.5);
+          text-transform: uppercase;
+          white-space: nowrap;
+          margin-top: 0.2rem;
         }
       `}</style>
     </div>

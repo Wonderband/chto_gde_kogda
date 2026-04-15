@@ -35,6 +35,95 @@ function isVideoQuestion(question) {
   return question?.presentation_mode === "video" && !!question?.video_src;
 }
 
+// Confetti animation (experts win)
+const CONFETTI_COLORS = ["#5ab85a", "#c9a84c", "#e2c06a", "#4de84d", "#fff8e0", "#38a338"];
+function Confetti() {
+  const pieces = Array.from({ length: 32 }, (_, i) => ({
+    id: i,
+    left: `${Math.random() * 100}%`,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    dur: `${2.2 + Math.random() * 1.8}s`,
+    delay: `${Math.random() * 2.5}s`,
+    rotate: Math.random() > 0.5 ? "2px" : "10px",
+    isRect: Math.random() > 0.4,
+  }));
+  return (
+    <>
+      {pieces.map((p) => (
+        <span
+          key={p.id}
+          className="confetti-piece"
+          style={{
+            left: p.left,
+            "--cf-dur": p.dur,
+            "--cf-delay": p.delay,
+            background: p.color,
+            width: p.isRect ? "10px" : "8px",
+            height: p.isRect ? "6px" : "8px",
+            borderRadius: p.isRect ? "1px" : "50%",
+            animationDelay: p.delay,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+// Fireworks (experts win)
+function Fireworks() {
+  const fws = [
+    { top: "20%", left: "18%", color: "#5ab85a", dur: "1.8s", delay: "0s" },
+    { top: "15%", left: "75%", color: "#c9a84c", dur: "2.1s", delay: "0.7s" },
+    { top: "35%", left: "50%", color: "#4de84d", dur: "1.6s", delay: "1.3s" },
+  ];
+  return (
+    <>
+      {fws.map((fw, i) => (
+        <span
+          key={i}
+          className="firework"
+          style={{
+            top: fw.top,
+            left: fw.left,
+            "--fw-color": fw.color,
+            "--fw-dur": fw.dur,
+            "--fw-delay": fw.delay,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+// Rain (viewers win)
+function Rain() {
+  const drops = Array.from({ length: 24 }, (_, i) => ({
+    id: i,
+    left: `${(i / 24) * 100 + Math.random() * 4}%`,
+    dur: `${0.75 + Math.random() * 0.7}s`,
+    delay: `${Math.random() * 1.5}s`,
+    height: `${18 + Math.random() * 14}px`,
+    opacity: 0.35 + Math.random() * 0.3,
+  }));
+  return (
+    <>
+      {drops.map((d) => (
+        <span
+          key={d.id}
+          className="rain-drop"
+          style={{
+            left: d.left,
+            "--rd-dur": d.dur,
+            "--rd-delay": d.delay,
+            height: d.height,
+            opacity: d.opacity,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
 function Game() {
   const { state, send } = useGame();
   const {
@@ -117,6 +206,13 @@ function Game() {
     currentQuestion,
   });
 
+  // Compute which sectors have blitz questions (best-effort: index in initial shuffled queue)
+  const blitzSectors = new Set(
+    (state.questions || [])
+      .map((q, i) => (q.blitz_position === 1 ? i : -1))
+      .filter((i) => i !== -1)
+  );
+
   const showRoulette =
     gameState === STATES.IDLE ||
     gameState === STATES.ANNOUNCING ||
@@ -179,34 +275,12 @@ function Game() {
             flex: showRoulette ? 1 : 0,
           }}
         >
-          {gameState === STATES.IDLE && (
-            <div className="roulette-overlay-label fade-in">
-              <div className="idle-title title-glow">ЩО? ДЕ? КОЛИ?</div>
-              <div className="idle-subtitle">Breaking Bad Edition</div>
-              <div className="idle-hint-key">
-                Натисніть <kbd>Пробіл</kbd> щоб почати
-              </div>
-            </div>
-          )}
-          {gameState === STATES.ANNOUNCING && (
-            <div className="spin-label fade-in">
-              {GAME_LANGUAGE === "ru" ? "Починаємо раунд..." : "Починаємо раунд..."}
-            </div>
-          )}
-          {gameState === STATES.SPINNING && (
-            <div className="spin-label fade-in">Крутимо волчок!</div>
-          )}
-          {gameState === STATES.READY && (
-            <div className="ready-label fade-in">
-              Натисніть <kbd>Пробіл</kbd> — наступний раунд
-            </div>
-          )}
-
           <Roulette
             spinning={gameState === STATES.SPINNING}
             onTarget={handleRouletteTarget}
             onStop={handleRouletteStop}
             selectedSector={selectedSector}
+            blitzSectors={blitzSectors}
           />
         </div>
 
@@ -247,7 +321,9 @@ function Game() {
         )}
 
         {gameState === STATES.GAME_OVER && (
-          <div className="screen-gameover fade-in-scale">
+          <div className={`screen-gameover fade-in-scale ${state.winner === "experts" ? "gameover-win" : "gameover-loss gameover-loss-bg"}`}>
+            {state.winner === "experts" ? <Confetti /> : <Rain />}
+            {state.winner === "experts" && <Fireworks />}
             <div
               className={`gameover-title victory-pulse ${
                 state.winner === "experts" ? "experts-color" : "viewers-color"
@@ -255,14 +331,18 @@ function Game() {
             >
               {state.winner === "experts"
                 ? "ЗНАТОКИ ПЕРЕМОГЛИ!"
-                : "ТЕЛЕГЛЯДАЧІ ПЕРЕМОГЛИ!"}
+                : "ГЕРОЇ СЕРІАЛУ ПЕРЕМОГЛИ!"}
             </div>
             <div className="gameover-score">
               <span className="go-e">{score.experts}</span>
               <span className="go-sep"> : </span>
               <span className="go-v">{score.viewers}</span>
             </div>
-            <div className="gameover-motto">Що наше життя? Гра!</div>
+            <div className="gameover-motto">
+              {state.winner === "experts"
+                ? "Я зробив це. Тільки я."
+                : "Що наше життя? Гра!"}
+            </div>
             <div className="gameover-hint">
               Натисніть <kbd>R</kbd> для нової гри
             </div>
