@@ -39,7 +39,7 @@ export const PLAYER_NAMES = (e.VITE_PLAYER_NAMES || "")
 
 // ─── AI models & voices ────────────────────────────────────────────────────
 /** OpenAI Realtime API model */
-export const REALTIME_MODEL = e.VITE_REALTIME_MODEL || "gpt-realtime-mini";
+export const REALTIME_MODEL = e.VITE_REALTIME_MODEL || "gpt-4o-mini-realtime-preview";
 /** Realtime API voice (used for ALL live moderator speech) */
 export const REALTIME_VOICE = e.VITE_REALTIME_VOICE || "echo";
 /** TTS model for non-realtime announcements (Стоп!, mock mode).
