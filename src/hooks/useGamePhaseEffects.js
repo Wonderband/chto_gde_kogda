@@ -134,6 +134,9 @@ export function useGamePhaseEffects({
   const recorderRef = useRef(null);
   const awaitingVideoEndRef = useRef(false);
   const videoFinishInFlightRef = useRef(false);
+  // Tracks the running startWheelDialogue promise so READING can wait for the
+  // spinning reaction to finish before closing the session (prevents audio cutoff).
+  const spinDialogueCompleteRef = useRef(null);
 
   async function tts(text, options = {}) {
     setTtsPlaying(true);
@@ -283,7 +286,10 @@ export function useGamePhaseEffects({
         preSessionRef.current = session;
         console.log("[App][Spin session ready]");
 
-        await startWheelDialogue(
+        // Store the promise so READING effect can wait for it before closing
+        // the session — prevents the reaction audio from being cut off when the
+        // spin stops and READING starts while the dialogue is still playing.
+        const dialoguePromise = startWheelDialogue(
           session,
           systemPromptRef.current,
           {
@@ -294,6 +300,8 @@ export function useGamePhaseEffects({
           },
           { delayMs: WHEEL_DIALOGUE_DELAY_MS }
         );
+        spinDialogueCompleteRef.current = dialoguePromise;
+        await dialoguePromise;
 
         if (cancelled) return;
         console.log("[App][Spin dialogue started]");
@@ -346,6 +354,17 @@ export function useGamePhaseEffects({
         };
 
         try {
+          // Give the spinning dialogue reaction time to finish before closing the
+          // session — prevents audio from being cut off mid-sentence. Grace period
+          // is max 3.5s; if the dialogue finishes earlier the wait resolves immediately.
+          const pendingDialogue = spinDialogueCompleteRef.current;
+          spinDialogueCompleteRef.current = null;
+          if (pendingDialogue) {
+            await Promise.race([
+              pendingDialogue.catch(() => {}),
+              new Promise((r) => setTimeout(r, 3500)),
+            ]);
+          }
           closePreSession();
           let attempt = 0;
           let completed = false;
@@ -377,6 +396,18 @@ export function useGamePhaseEffects({
                 systemPrompt: systemPromptRef.current,
                 gameContext: buildCtx(),
                 warmupTimeoutMs: 6000,
+                openReadSession: async () => {
+                  const s = new RealtimeSession();
+                  s.onError = (err) =>
+                    console.error("[Read session error]", err.message);
+                  await s.open({
+                    apiKey,
+                    systemPrompt: systemPromptRef.current,
+                    voice: REALTIME_VOICE,
+                    enableMic: false,
+                  });
+                  return s;
+                },
               });
 
               waitingForVideoEnd = !!result?.awaitVideoEnd;
@@ -411,6 +442,9 @@ export function useGamePhaseEffects({
         } catch (e) {
           console.error("[Session 1 final failure]", e);
           closePreSession();
+          // Prevent game freeze: if all retries failed, advance to DISCUSSING so
+          // players can still answer even though the question wasn't read aloud.
+          if (!cancelled) send(EVENTS.READING_DONE);
         }
       })();
 

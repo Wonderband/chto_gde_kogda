@@ -1,6 +1,7 @@
 import {
   buildModeratorBaseInstructions,
   buildPostAnswerBaseInstructions,
+  buildVerbatimBaseInstructions,
   buildNameConfirmationPrompt,
   buildListeningCuePrompt,
   buildSegueCuePrompt,
@@ -10,6 +11,22 @@ import { TOKENS } from "../config.js";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function _withRetry(label, fn, attempts = 2) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts) {
+        console.warn(`[Realtime][Session2] ${label} attempt ${i} failed, retrying:`, err?.message);
+        await delay(800);
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function isRu(gameContext = {}) {
@@ -23,7 +40,12 @@ async function waitForCompletedSpokenTurn(
   stage,
   timeoutMs = 30000
 ) {
-  const done = await session.waitForResponseDone(responseId, timeoutMs);
+  // Pre-register both waiters — output_audio_buffer.stopped can arrive before
+  // response.done on the wire; registering after awaiting done risks missing it.
+  const doneProm = session.waitForResponseDone(responseId, timeoutMs);
+  const audioProm = session.waitForAudioStopped(responseId, timeoutMs);
+
+  const done = await doneProm;
   const status = done?.response?.status || "";
   const reason = done?.response?.status_details?.reason || "";
   console.log(`[Realtime][Session2] ${stage} response.done`, {
@@ -32,7 +54,17 @@ async function waitForCompletedSpokenTurn(
     reason,
   });
 
-  await session.waitForAudioStopped(responseId, timeoutMs);
+  if (status !== "completed") {
+    // Response failed — no audio produced. Silence the dangling promise.
+    audioProm.catch(() => {});
+    throw new Error(
+      `${stage} did not complete cleanly (status=${status}, reason=${
+        reason || ""
+      })`
+    );
+  }
+
+  await audioProm;
   console.log(`[Realtime][Session2] ${stage} output audio stopped`, {
     responseId,
     status,
@@ -43,14 +75,6 @@ async function waitForCompletedSpokenTurn(
   console.log(`[Realtime][Session2] ${stage} grace tail complete`, {
     responseId,
   });
-
-  if (status !== "completed") {
-    throw new Error(
-      `${stage} did not complete cleanly (status=${status}, reason=${
-        reason || ""
-      })`
-    );
-  }
 }
 
 export async function playListeningCue({
@@ -151,24 +175,18 @@ export async function playNeutralSegueCue({
     instructions: buildPostAnswerBaseInstructions(systemPrompt),
   });
 
-  const created = await session.createResponse({
-    instructions: buildSegueCuePrompt(gameContext),
-    tools: [],
-    outputModalities: ["audio"],
-    metadata: { stage: "segue_cue" },
-    maxOutputTokens: TOKENS.SEGUE_CUE,
+  const created = await _withRetry("segue cue", async () => {
+    const r = await session.createResponse({
+      instructions: buildSegueCuePrompt(gameContext),
+      tools: [],
+      outputModalities: ["audio"],
+      metadata: { stage: "segue_cue" },
+      maxOutputTokens: TOKENS.SEGUE_CUE,
+    });
+    console.log("[Realtime][Session2] segue cue created", { responseId: r.responseId });
+    await waitForCompletedSpokenTurn(session, r.responseId, "segue cue", 20000);
+    return r;
   });
-
-  console.log("[Realtime][Session2] segue cue created", {
-    responseId: created.responseId,
-  });
-
-  await waitForCompletedSpokenTurn(
-    session,
-    created.responseId,
-    "segue cue",
-    20000
-  );
   const segueText = session.getResponseTranscript(created.responseId);
   console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (segue):", segueText || "(no transcript)");
 }
@@ -189,27 +207,21 @@ export async function playExplanationCue({
   // assistant mode without an explicit persona reset.
   await session.setMonologueMode({
     tools: [],
-    instructions: buildPostAnswerBaseInstructions(systemPrompt),
+    instructions: buildVerbatimBaseInstructions(),
   });
 
-  const created = await session.createResponse({
-    instructions: buildExplanationCuePrompt(text),
-    tools: [],
-    outputModalities: ["audio"],
-    metadata: { stage: "explanation_cue" },
-    maxOutputTokens: TOKENS.EXPLANATION_CUE,
+  const created = await _withRetry("explanation cue", async () => {
+    const r = await session.createResponse({
+      instructions: buildExplanationCuePrompt(text),
+      tools: [],
+      outputModalities: ["audio"],
+      metadata: { stage: "explanation_cue" },
+      maxOutputTokens: TOKENS.EXPLANATION_CUE,
+    });
+    console.log("[Realtime][Session2] explanation cue created", { responseId: r.responseId });
+    await waitForCompletedSpokenTurn(session, r.responseId, "explanation cue", 60000);
+    return r;
   });
-
-  console.log("[Realtime][Session2] explanation cue created", {
-    responseId: created.responseId,
-  });
-
-  await waitForCompletedSpokenTurn(
-    session,
-    created.responseId,
-    "explanation cue",
-    60000
-  );
   const explanationText = session.getResponseTranscript(created.responseId);
   console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (пояснення):", explanationText || "(no transcript)");
   console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
