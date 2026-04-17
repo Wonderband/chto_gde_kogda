@@ -363,20 +363,33 @@ export default function App() {
   return (
     <>
       {introPlaying && (
-        <video
-          src="/sounds/intro.mp4"
-          autoPlay
-          onEnded={() => setIntroPlaying(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            zIndex: 999,
-            background: "#000",
-          }}
-        />
+        <>
+          <video
+            src="/sounds/intro.mp4"
+            autoPlay
+            onEnded={() => setIntroPlaying(false)}
+            style={{ display: "none" }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 999,
+              background: "#000",
+            }}
+          >
+            <img
+              src="/intro_img.jpg"
+              alt=""
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
+          </div>
+        </>
       )}
       <GameProvider>
         <Game />
