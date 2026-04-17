@@ -1,6 +1,5 @@
 import {
   buildModeratorBaseInstructions,
-  buildPostAnswerBaseInstructions,
   buildVerbatimBaseInstructions,
   buildNameConfirmationPrompt,
   buildListeningCuePrompt,
@@ -21,7 +20,10 @@ async function _withRetry(label, fn, attempts = 2) {
     } catch (err) {
       lastErr = err;
       if (i < attempts) {
-        console.warn(`[Realtime][Session2] ${label} attempt ${i} failed, retrying:`, err?.message);
+        console.warn(
+          `[Realtime][Session2] ${label} attempt ${i} failed, retrying:`,
+          err?.message
+        );
         await delay(800);
       }
     }
@@ -32,7 +34,6 @@ async function _withRetry(label, fn, attempts = 2) {
 function isRu(gameContext = {}) {
   return (gameContext.game_language || "uk") !== "uk";
 }
-
 
 async function waitForCompletedSpokenTurn(
   session,
@@ -85,8 +86,13 @@ export async function playListeningCue({
 }) {
   await session.setMonologueMode({
     tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
+    instructions: buildVerbatimBaseInstructions(),
   });
+
+  // Session 2 may have been pre-opened ~60 s ago during DISCUSSING.
+  // The browser AudioContext can be suspended after prolonged silence —
+  // priming ensures the audio element is active before the first response.
+  await session.primeAudioOutput(5000);
 
   const created = await session.createResponse({
     instructions: buildListeningCuePrompt(gameContext, earlyAnswer),
@@ -94,6 +100,7 @@ export async function playListeningCue({
     outputModalities: ["audio"],
     metadata: { stage: earlyAnswer ? "early_answer_cue" : "time_over_cue" },
     maxOutputTokens: TOKENS.LISTENING_CUE,
+    conversation: "none",
   });
 
   console.log("[Realtime][Session2] listening cue response created", {
@@ -109,7 +116,10 @@ export async function playListeningCue({
   );
   const cueText = session.getResponseTranscript(created.responseId);
   console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
-  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (cue):", cueText || "(no transcript)");
+  console.log(
+    "[DIALOGUE][Session2] ВЕДУЧИЙ (cue):",
+    cueText || "(no transcript)"
+  );
 
   // ── Name capture mini-dialogue ────────────────────────────────────────────
   // Captain names who will answer ("Відповідає Наталія").
@@ -130,34 +140,65 @@ export async function playListeningCue({
     await delay(400);
 
     const transcript = await session.waitForInputTranscript(2000);
-    console.log("[DIALOGUE][Session2] КАПІТАН:", transcript ?? "(не розпізнано)");
+    console.log(
+      "[DIALOGUE][Session2] КАПІТАН:",
+      transcript ?? "(не розпізнано)"
+    );
 
     const confirmResponse = await session.createResponse({
       instructions: buildNameConfirmationPrompt(gameContext, transcript),
       outputModalities: ["audio"],
       maxOutputTokens: TOKENS.NAME_CONFIRM,
     });
-    await waitForCompletedSpokenTurn(session, confirmResponse.responseId, "name confirm", 15000);
-    const confirmText = session.getResponseTranscript(confirmResponse.responseId);
-    console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження):", confirmText || "(no transcript)");
+    await waitForCompletedSpokenTurn(
+      session,
+      confirmResponse.responseId,
+      "name confirm",
+      15000
+    );
+    const confirmText = session.getResponseTranscript(
+      confirmResponse.responseId
+    );
+    console.log(
+      "[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження):",
+      confirmText || "(no transcript)"
+    );
     console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
   } catch {
-    console.log("[DIALOGUE][Session2] капітан не відповів — вимовляємо fallback");
+    console.log(
+      "[DIALOGUE][Session2] капітан не відповів — вимовляємо fallback"
+    );
     // Players need an audible signal that recording is about to start.
     // Say "Слухаємо вас!" (same as the no-name path in buildNameConfirmationPrompt)
     // so they know to begin speaking their answer.
     try {
-      await session.setMonologueMode({ tools: [] });
+      await session.setMonologueMode({
+        tools: [],
+        instructions: buildVerbatimBaseInstructions(),
+      });
       const fallback = await session.createResponse({
         instructions: buildNameConfirmationPrompt(gameContext, null),
         outputModalities: ["audio"],
         maxOutputTokens: TOKENS.NAME_CONFIRM,
+        conversation: "none",
       });
-      await waitForCompletedSpokenTurn(session, fallback.responseId, "name confirm fallback", 10000);
-      console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження): Слухаємо вас!");
-      console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+      await waitForCompletedSpokenTurn(
+        session,
+        fallback.responseId,
+        "name confirm fallback",
+        10000
+      );
+      console.log(
+        "[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження): Слухаємо вас!"
+      );
+      console.log(
+        "[DIALOGUE][Session2] ──────────────────────────────────────"
+      );
     } catch (fallbackErr) {
-      console.warn("[DIALOGUE][Session2] name confirm fallback failed:", fallbackErr?.message);
+      console.warn(
+        "[DIALOGUE][Session2] name confirm fallback failed:",
+        fallbackErr?.message
+      );
     }
   }
 
@@ -165,14 +206,10 @@ export async function playListeningCue({
   await session.setMonologueMode({ tools: [] });
 }
 
-export async function playNeutralSegueCue({
-  session,
-  systemPrompt,
-  gameContext,
-}) {
+export async function playNeutralSegueCue({ session, gameContext }) {
   await session.setMonologueMode({
     tools: [],
-    instructions: buildPostAnswerBaseInstructions(systemPrompt),
+    instructions: buildVerbatimBaseInstructions(),
   });
 
   const created = await _withRetry("segue cue", async () => {
@@ -182,29 +219,32 @@ export async function playNeutralSegueCue({
       outputModalities: ["audio"],
       metadata: { stage: "segue_cue" },
       maxOutputTokens: TOKENS.SEGUE_CUE,
+      conversation: "none",
     });
-    console.log("[Realtime][Session2] segue cue created", { responseId: r.responseId });
+    console.log("[Realtime][Session2] segue cue created", {
+      responseId: r.responseId,
+    });
     await waitForCompletedSpokenTurn(session, r.responseId, "segue cue", 20000);
     return r;
   });
   const segueText = session.getResponseTranscript(created.responseId);
-  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (segue):", segueText || "(no transcript)");
+  console.log(
+    "[DIALOGUE][Session2] ВЕДУЧИЙ (segue):",
+    segueText || "(no transcript)"
+  );
 }
 
-export async function playExplanationCue({
-  session,
-  systemPrompt,
-  evaluation,
-  gameContext,
-}) {
+export async function playExplanationCue({ session, evaluation, gameContext }) {
   const ru = isRu(gameContext);
   const fallback = ru
     ? `Правильный ответ: ${evaluation.correct_answer_reveal}.`
     : `Правильна відповідь: ${evaluation.correct_answer_reveal}.`;
-  const text = (evaluation.explanation || fallback).trim();
 
-  // Re-anchor persona before explanation. After segue cue the model can drift into
-  // assistant mode without an explicit persona reset.
+  const sanitizeForAudio = (t) =>
+    t.replace(/\bBitch\b/g, "Біч").replace(/\bbitch\b/g, "біч");
+
+  const text = sanitizeForAudio((evaluation.explanation || fallback).trim());
+
   await session.setMonologueMode({
     tools: [],
     instructions: buildVerbatimBaseInstructions(),
@@ -217,13 +257,24 @@ export async function playExplanationCue({
       outputModalities: ["audio"],
       metadata: { stage: "explanation_cue" },
       maxOutputTokens: TOKENS.EXPLANATION_CUE,
+      conversation: "none",
     });
-    console.log("[Realtime][Session2] explanation cue created", { responseId: r.responseId });
-    await waitForCompletedSpokenTurn(session, r.responseId, "explanation cue", 60000);
+    console.log("[Realtime][Session2] explanation cue created", {
+      responseId: r.responseId,
+    });
+    await waitForCompletedSpokenTurn(
+      session,
+      r.responseId,
+      "explanation cue",
+      60000
+    );
     return r;
   });
   const explanationText = session.getResponseTranscript(created.responseId);
-  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (пояснення):", explanationText || "(no transcript)");
+  console.log(
+    "[DIALOGUE][Session2] ВЕДУЧИЙ (пояснення):",
+    explanationText || "(no transcript)"
+  );
   console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
 }
 

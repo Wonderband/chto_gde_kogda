@@ -79,6 +79,60 @@ function buildVideoTimeCueFallbackText(question, lang) {
   return timeLine(question, lang);
 }
 
+function buildAttentionFallbackText(question, lang) {
+  const isRu = lang === "ru";
+  if (question?.round_type !== "blitz") {
+    return isRu ? "Внимание! Вопрос!" : "Увага! Питання!";
+  }
+  const label = blitzPositionLabel(question?.blitz_position || 1, lang);
+  return isRu ? `Внимание! ${label} вопрос!` : `Увага! ${label} питання!`;
+}
+
+async function performReadingTtsFallback({
+  question,
+  lang,
+  tts,
+  playGongFn,
+}) {
+  if (!question) throw new Error('No question available for reading fallback');
+
+  if (isVideoQuestion(question)) {
+    await tts(lang === 'ru' ? 'Внимание на экран!' : 'Увага на екран!');
+    await playGongFn();
+    return { awaitVideoEnd: true };
+  }
+
+  const qText = lang === 'ru' ? question.question_ru : question.question_uk;
+  if (!qText) throw new Error('No localized question text available for reading fallback');
+
+  await tts(buildAttentionFallbackText(question, lang));
+  await playGongFn();
+  await tts(qText);
+  return { awaitVideoEnd: false };
+}
+
+function isHighRiskReadQuestion(question) {
+  return (
+    question?.force_no_warmup === true ||
+    question?.round_type === "blitz" ||
+    question?.id === "bb_q11"
+  );
+}
+
+function isProtectedReadFailure(error) {
+  const msg = `${error?.message || ""}`.toLowerCase();
+  return (
+    msg.includes("attention cue") ||
+    msg.includes("question read") ||
+    msg.includes("video cue") ||
+    msg.includes("video_cue") ||
+    msg.includes("item announce video cue") ||
+    msg.includes("item_announce_video_cue") ||
+    msg.includes("black box video cue") ||
+    msg.includes("black_box_video_cue")
+  );
+}
+
 /**
  * Builds the full spoken explanation text from hard-coded material — no AI generation.
  * Structure: hint_for_evaluator (verbatim) → verdict sentence → score sentence.
@@ -137,6 +191,10 @@ export function useGamePhaseEffects({
   // Tracks the running startWheelDialogue promise so READING can wait for the
   // spinning reaction to finish before closing the session (prevents audio cutoff).
   const spinDialogueCompleteRef = useRef(null);
+  // Abort signal object shared with startWheelDialogue. When SPIN_DONE fires and
+  // READING starts, we set aborted=true so the dialogue skips waiting for player
+  // speech and exits immediately. Any reaction already in flight plays to completion.
+  const spinDialogueAbortRef = useRef(null);
 
   async function tts(text, options = {}) {
     setTtsPlaying(true);
@@ -286,9 +344,14 @@ export function useGamePhaseEffects({
         preSessionRef.current = session;
         console.log("[App][Spin session ready]");
 
-        // Store the promise so READING effect can wait for it before closing
-        // the session — prevents the reaction audio from being cut off when the
-        // spin stops and READING starts while the dialogue is still playing.
+        // Create a shared abort signal. READING sets aborted=true when the wheel
+        // stops — dialogue checks it before waiting for player speech and exits
+        // immediately if aborted, so we don't wait 8s for a response that won't come.
+        const abortSignal = { aborted: false };
+        spinDialogueAbortRef.current = abortSignal;
+
+        // Store the promise so READING effect can wait for any in-flight reaction
+        // audio to finish before closing the session (prevents audio cutoff).
         const dialoguePromise = startWheelDialogue(
           session,
           systemPromptRef.current,
@@ -298,7 +361,7 @@ export function useGamePhaseEffects({
             game_language: GAME_LANGUAGE,
             players: playersRef?.current || [],
           },
-          { delayMs: WHEEL_DIALOGUE_DELAY_MS }
+          { delayMs: WHEEL_DIALOGUE_DELAY_MS, abortSignal }
         );
         spinDialogueCompleteRef.current = dialoguePromise;
         await dialoguePromise;
@@ -354,15 +417,23 @@ export function useGamePhaseEffects({
         };
 
         try {
-          // Give the spinning dialogue reaction time to finish before closing the
-          // session — prevents audio from being cut off mid-sentence. Grace period
-          // is max 3.5s; if the dialogue finishes earlier the wait resolves immediately.
+          // Signal the spinning dialogue to skip waiting for player speech —
+          // the wheel has stopped so we no longer want to wait up to 8s for
+          // the player to respond. Any reaction already in flight plays to completion.
+          if (spinDialogueAbortRef.current) {
+            spinDialogueAbortRef.current.aborted = true;
+            spinDialogueAbortRef.current = null;
+          }
+
+          // Wait for the dialogue to finish (opening phrase / reaction already in
+          // flight). Grace period is 10s — covers the full reaction token budget
+          // (~6s audio) plus safety margin. Resolves immediately if already done.
           const pendingDialogue = spinDialogueCompleteRef.current;
           spinDialogueCompleteRef.current = null;
           if (pendingDialogue) {
             await Promise.race([
               pendingDialogue.catch(() => {}),
-              new Promise((r) => setTimeout(r, 3500)),
+              new Promise((r) => setTimeout(r, 10000)),
             ]);
           }
           closePreSession();
@@ -371,7 +442,8 @@ export function useGamePhaseEffects({
           let lastErr = null;
           let waitingForVideoEnd = false;
 
-          while (!completed && attempt < 2 && !cancelled) {
+          const maxSessionAttempts = isHighRiskReadQuestion(currentQuestion) ? 1 : 2;
+          while (!completed && attempt < maxSessionAttempts && !cancelled) {
             attempt += 1;
             let session = null;
             let keepSessionOpen = false;
@@ -410,12 +482,23 @@ export function useGamePhaseEffects({
                 },
               });
 
+              if (result?.activeSession && result.activeSession !== session) {
+                preSessionRef.current = result.activeSession;
+              }
               waitingForVideoEnd = !!result?.awaitVideoEnd;
-              keepSessionOpen = waitingForVideoEnd;
+              keepSessionOpen = waitingForVideoEnd && !!(result?.activeSession || session);
               completed = true;
             } catch (e) {
               lastErr = e;
               console.error("[Session 1 flow failed]", { attempt, error: e });
+              if (isProtectedReadFailure(e)) {
+                console.warn("[App][READING] Protected read failed — falling back to TTS without restarting Session 1", {
+                  attempt,
+                  questionId: currentQuestion?.id,
+                  message: e?.message || "",
+                });
+                break;
+              }
             } finally {
               if (!keepSessionOpen && session) session.close();
               if (!keepSessionOpen && preSessionRef.current === session) {
@@ -442,9 +525,35 @@ export function useGamePhaseEffects({
         } catch (e) {
           console.error("[Session 1 final failure]", e);
           closePreSession();
-          // Prevent game freeze: if all retries failed, advance to DISCUSSING so
-          // players can still answer even though the question wasn't read aloud.
-          if (!cancelled) send(EVENTS.READING_DONE);
+
+          if (cancelled) return;
+
+          try {
+            console.warn("[App][READING] Falling back to local TTS", {
+              questionId: currentQuestion?.id,
+              videoMode: isVideoQuestion(currentQuestion),
+            });
+            const fallbackResult = await performReadingTtsFallback({
+              question: currentQuestion,
+              lang: GAME_LANGUAGE,
+              tts,
+              playGongFn: playGong,
+            });
+
+            if (cancelled) return;
+
+            if (fallbackResult?.awaitVideoEnd) {
+              awaitingVideoEndRef.current = true;
+              setVideoReady(true);
+              console.log("[App][READING] TTS fallback waiting for video end");
+              return;
+            }
+
+            console.log("[App][READING] TTS fallback completed");
+            send(EVENTS.READING_DONE);
+          } catch (fallbackErr) {
+            console.error("[App][READING] TTS fallback failed", fallbackErr);
+          }
         }
       })();
 
@@ -556,6 +665,12 @@ export function useGamePhaseEffects({
           voice: REALTIME_VOICE,
           enableMic: true,
         });
+        // Mute mic immediately — team discussion audio must NOT accumulate in the
+        // session conversation context. If the mic stays on, 60 s of player speech
+        // gets committed as user turns, which causes the model to ignore the
+        // listening-cue instructions and fall back to default assistant behavior.
+        // setDialogueMode in playListeningCue re-enables the mic when needed.
+        session.setMicEnabled(false);
         if (cancelled) { session.close(); return; }
         postSessionRef.current = session;
         console.log("[App][DISCUSSING] Session 2 pre-opened and ready");
@@ -800,16 +915,17 @@ export function useGamePhaseEffects({
               session.close();
               return;
             }
-            postSessionRef.current = session;
             await playNeutralSegueCue({
               session,
               systemPrompt: systemPromptRef.current,
               gameContext: buildCtx(),
             });
+            session.close();
           }
         } catch (e) {
           console.error("[SCORING segue failed]", e);
         } finally {
+          closePostSession();
           if (!cancelled) send(EVENTS.SCORING_DONE);
         }
       })();
@@ -830,10 +946,23 @@ export function useGamePhaseEffects({
       let cancelled = false;
 
       (async () => {
+        let session = null;
         try {
           await playGong();
-          const session = postSessionRef.current;
-          if (session && apiKey) {
+          if (apiKey && systemPromptRef.current) {
+            session = new RealtimeSession();
+            session.onError = (err) =>
+              console.error("[Session2 explanation error]", err.message);
+            await session.open({
+              apiKey,
+              systemPrompt: systemPromptRef.current,
+              voice: REALTIME_VOICE,
+              enableMic: false,
+            });
+            if (cancelled) {
+              session.close();
+              return;
+            }
             await playExplanationCue({
               session,
               systemPrompt: systemPromptRef.current || "",
@@ -841,13 +970,13 @@ export function useGamePhaseEffects({
               gameContext: buildCtx(),
             });
           } else if (evaluation?.explanation) {
-            // Realtime session didn't open (e.g. 504 from OpenAI) — fall back to TTS
             console.warn("[EXPLAINING] Realtime session unavailable, falling back to TTS");
             await speak(evaluation.explanation);
           }
         } catch (e) {
           console.error("[EXPLAINING effect]", e);
         } finally {
+          try { session?.close?.(); } catch {}
           closePostSession();
           if (!cancelled) send(EVENTS.EXPLAINING_DONE);
         }

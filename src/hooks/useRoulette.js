@@ -26,11 +26,10 @@ export function useRoulette(gameState, send, graceClosePreSession) {
   const handleRouletteStop = useCallback(
     async (sector) => {
       console.log("[App][Roulette stop]", { sector });
-      await graceClosePreSession();
       setSelectedSector(sector);
       send(EVENTS.SPIN_DONE, { sector });
     },
-    [send, graceClosePreSession]
+    [send]
   );
 
   return {

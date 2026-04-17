@@ -38,16 +38,33 @@ export const PLAYER_NAMES = (e.VITE_PLAYER_NAMES || "")
   .filter(Boolean);
 
 // ─── AI models & voices ────────────────────────────────────────────────────
-/** OpenAI Realtime API model */
-export const REALTIME_MODEL = e.VITE_REALTIME_MODEL || "gpt-4o-mini-realtime-preview";
-/** Realtime API voice (used for ALL live moderator speech) */
-export const REALTIME_VOICE = e.VITE_REALTIME_VOICE || "echo";
+/** OpenAI Realtime API model.
+ * If the env still points at the old preview alias, upgrade to a pinned GA snapshot
+ * to reduce behavioral drift across runs. */
+const requestedRealtimeModel = e.VITE_REALTIME_MODEL || "";
+export const REALTIME_MODEL = "gpt-4o-mini-realtime-preview";
+// !requestedRealtimeModel ||
+// requestedRealtimeModel === "gpt-4o-mini-realtime-preview" ||
+// requestedRealtimeModel === "gpt-4o-realtime-preview"
+//   ? "gpt-realtime-2025-08-28"
+//   : requestedRealtimeModel;
+/** Realtime API voice (used for ALL live moderator speech).
+ * If the env still uses the old default echo voice, upgrade to cedar. */
+const requestedRealtimeVoice = e.VITE_REALTIME_VOICE || "";
+export const REALTIME_VOICE =
+  !requestedRealtimeVoice || requestedRealtimeVoice === "echo"
+    ? "cedar"
+    : requestedRealtimeVoice;
+/** Realtime session input transcription model */
+export const REALTIME_INPUT_TRANSCRIBE_MODEL =
+  e.VITE_REALTIME_INPUT_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
+
 /** TTS model for non-realtime announcements (Стоп!, mock mode).
  *  gpt-4o-mini-tts supports the `instructions` field for language hints,
  *  which fixes the English accent on Ukrainian text. */
 export const TTS_MODEL = e.VITE_TTS_MODEL || "gpt-4o-mini-tts";
 /** TTS voice */
-export const TTS_VOICE = e.VITE_TTS_VOICE || "onyx";
+export const TTS_VOICE = e.VITE_TTS_VOICE || "cedar";
 /** Speech-to-text model for team answer transcription */
 export const TRANSCRIBE_MODEL =
   e.VITE_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
@@ -66,14 +83,15 @@ export const FAST_EVALUATOR_MODEL =
  * Increase if speech is cut off; decrease to save cost.
  */
 export const TOKENS = {
-  WHEEL_OPENING: 350, // spinning phase opener            (~6–7 s, player-specific banter + reaction)
+  WHEEL_OPENING: 350, // spinning phase opener            (~6–7 s, player-specific banter)
+  WHEEL_REACTION: 300, // spinning phase reaction           (~5 s safety net; prompt enforces ≤8 words)
   COMBINED_INTRO: 600, // sector + character + intro_flavor (~10 s, one combined monologue)
-  WARMUP_REACTION: 200, // warmup reaction phrase            (~3 s; +video cue when needed)
-  VIDEO_CUE: 150, // "увага на екран" / "Час! Двадцять секунд!" (~2 s, 3–5 words max)
+  WARMUP_REACTION: 350, // warmup reaction phrase            (~6 s safety net; prompt enforces ≤8 words)
+  VIDEO_CUE: 250, // "увага на екран" / "Час! Двадцять секунд!" (~2 s, prompt now uses reliable РІВНО block)
   ATTENTION_CUE: 400, // "Увага! Питання!" or blitz announcement  (~6 s, up to ~15 words for blitz)
   LISTENING_CUE: 220, // "Час вийшов. Хто відповідатиме?"         (~4–5 s)
   SEGUE_CUE: 200, // "А тепер — правильна відповідь."         (~3 s)
-  EXPLANATION_CUE: 1000, // full explanation narrative         (~20–30 s)
+  EXPLANATION_CUE: 2200, // full explanation narrative         (~35–45 s)
   NAME_CONFIRM: 120, // "Слухаємо вас, пані Наталю!"      (~2 s)
 };
 

@@ -52,7 +52,19 @@ export class RealtimeSession {
 
     // Input transcription — populated when input_audio_transcription is enabled
     this._inputTranscriptWaiters = [];
+
+    // Final fully-assembled user turn, ready to be consumed by waitForInputTranscript()
     this._pendingInputTranscript = null;
+
+    // Fragments of the current user turn while STT is still delivering pieces
+    this._pendingInputTranscriptParts = [];
+
+    // Debounce timer: when no new transcript chunk arrives for a short period,
+    // we treat the turn as complete and flush the joined phrase.
+    this._inputTranscriptFlushTimer = null;
+
+    // Tune this if needed. 300–500 ms is a good range.
+    this._inputTranscriptSettleMs = 900;
 
     this.onError = null;
     this.onSessionUpdated = null;
@@ -113,7 +125,7 @@ export class RealtimeSession {
     if (localStream) {
       this._localStream = localStream;
       this._ownsLocalStream = false;
-    } else if (enableMic) {
+    } else {
       this._localStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -122,6 +134,9 @@ export class RealtimeSession {
         },
       });
       this._ownsLocalStream = true;
+      for (const track of this._localStream.getAudioTracks()) {
+        track.enabled = !!enableMic;
+      }
     }
 
     if (this._localStream) {
@@ -267,22 +282,22 @@ export class RealtimeSession {
     createResponse = true,
     silenceDurationMs = null, // if set, uses server_vad instead of semantic_vad
   } = {}) {
-    this.setMicEnabled(true);
-    const turn_detection = silenceDurationMs != null
-      ? {
-          type: "server_vad",
-          silence_duration_ms: silenceDurationMs,
-          prefix_padding_ms: 300,
-          threshold: 0.5,
-          create_response: createResponse,
-          interrupt_response: interruptResponse,
-        }
-      : {
-          type: "semantic_vad",
-          eagerness,
-          create_response: createResponse,
-          interrupt_response: interruptResponse,
-        };
+    const turn_detection =
+      silenceDurationMs != null
+        ? {
+            type: "server_vad",
+            silence_duration_ms: silenceDurationMs,
+            prefix_padding_ms: 300,
+            threshold: 0.5,
+            create_response: createResponse,
+            interrupt_response: interruptResponse,
+          }
+        : {
+            type: "semantic_vad",
+            eagerness,
+            create_response: createResponse,
+            interrupt_response: interruptResponse,
+          };
     const patch = {
       tools,
       tool_choice: "auto",
@@ -294,9 +309,10 @@ export class RealtimeSession {
       input_audio_transcription: {
         model: "gpt-4o-mini-transcribe",
         language: GAME_LANGUAGE === "ru" ? "ru" : "uk",
-        prompt: GAME_LANGUAGE === "ru"
-          ? "Язык: русский. Имена: Уолтер Уайт, Джесси Пинкман, Хайзенберг, Густаво Фринг, Сол Гудман, Скайлер Уайт, Хэнк Шрейдер, Альбукерке. Не придумывай слов, которых не было сказано."
-          : "Мова: українська. Імена: Волтер Вайт, Джессі Пінкман, Гайзенберг, Густаво Фрінг, Сол Гудман, Скайлер Вайт, Генк Шрейдер, Альбукерке. Не вигадуй слів, яких не було сказано.",
+        prompt:
+          GAME_LANGUAGE === "ru"
+            ? "Язык: русский. Имена: Уолтер Уайт, Джесси Пинкман, Хайзенберг, Густаво Фринг, Сол Гудман, Скайлер Уайт, Хэнк Шрейдер, Альбукерке. Не придумывай слов, которых не было сказано."
+            : "Мова: українська. Імена: Волтер Вайт, Джессі Пінкман, Гайзенберг, Густаво Фрінг, Сол Гудман, Скайлер Вайт, Генк Шрейдер, Альбукерке. Не вигадуй слів, яких не було сказано.",
       },
     };
     if (instructions != null) patch.instructions = instructions;
@@ -319,7 +335,12 @@ export class RealtimeSession {
     this._send({ type: "input_audio_buffer.clear" });
     this._userSpeaking = false;
     this._lastUserStopAt = Date.now();
-    this._pendingInputTranscript = null; // discard any transcript from previous speech
+    this._pendingInputTranscript = null;
+    this._pendingInputTranscriptParts = [];
+    if (this._inputTranscriptFlushTimer) {
+      clearTimeout(this._inputTranscriptFlushTimer);
+      this._inputTranscriptFlushTimer = null;
+    }
   }
 
   async waitForIdle({ quietMs = 500, timeoutMs = 5000 } = {}) {
@@ -398,24 +419,67 @@ export class RealtimeSession {
     throw new Error(`user speech did not stop within ${timeoutMs} ms`);
   }
 
+  _normalizeJoinedInputTranscript(parts = []) {
+    return (parts || [])
+      .map((s) => (s || "").trim())
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  _flushPendingInputTranscript() {
+    if (!this._pendingInputTranscriptParts.length) return;
+
+    const parts = [...this._pendingInputTranscriptParts];
+    const partsCount = parts.length;
+
+    const finalText = this._normalizeJoinedInputTranscript(parts);
+
+    this._pendingInputTranscriptParts = [];
+
+    if (!finalText) return;
+
+    const waiter = this._inputTranscriptWaiters.shift();
+    if (waiter) {
+      waiter.resolve(finalText);
+    } else {
+      this._pendingInputTranscript = finalText;
+    }
+
+    console.log("[Realtime][InputTranscript][joined]", {
+      finalText,
+      partsCount,
+      parts,
+    });
+  }
+
   /**
    * Returns the transcript of the most recent player speech turn.
-   * Resolves as soon as conversation.item.input_audio_transcription.completed fires,
-   * or returns null if it doesn't arrive within timeoutMs.
-   * Requires input_audio_transcription to be enabled in the session (setDialogueMode does this).
+   * If STT delivers the turn in several chunks, they are joined into one phrase.
+   * Resolves after a short quiet period with the fully-assembled transcript,
+   * or returns null if nothing usable arrives within timeoutMs.
    */
   async waitForInputTranscript(timeoutMs = 2500) {
     if (this._closed) return null;
-    // Transcript already buffered (arrived during delay() or before this call)
+
+    // Already have a completed joined turn buffered
     if (this._pendingInputTranscript != null) {
       const t = this._pendingInputTranscript;
       this._pendingInputTranscript = null;
       return t || null;
     }
+
     const deferred = makeDeferred();
     this._inputTranscriptWaiters.push(deferred);
+
     try {
-      const t = await withTimeout(deferred.promise, timeoutMs, "input transcript");
+      const t = await withTimeout(
+        deferred.promise,
+        timeoutMs,
+        "input transcript"
+      );
       return t || null;
     } catch {
       const idx = this._inputTranscriptWaiters.indexOf(deferred);
@@ -713,7 +777,8 @@ export class RealtimeSession {
 
   _maybeFireTriggerPhrase(event) {
     const responseId = event.response_id;
-    const next = event.transcript ?? this._transcriptByResponseId.get(responseId) ?? "";
+    const next =
+      event.transcript ?? this._transcriptByResponseId.get(responseId) ?? "";
 
     const normalized = normalizeText(next);
     if (this._triggerFiredByResponseId.has(responseId)) return;
@@ -738,7 +803,10 @@ export class RealtimeSession {
     this._assistantSpeaking = true;
     this._lastAssistantStartAt = Date.now();
     if (!wasSpeaking) {
-      this._debugLog("[Realtime][Speech] assistant started", this.getSpeakingState());
+      this._debugLog(
+        "[Realtime][Speech] assistant started",
+        this.getSpeakingState()
+      );
     }
   }
 
@@ -747,7 +815,10 @@ export class RealtimeSession {
     this._assistantSpeaking = false;
     this._lastAssistantStopAt = Date.now();
     if (wasSpeaking) {
-      this._debugLog("[Realtime][Speech] assistant stopped", this.getSpeakingState());
+      this._debugLog(
+        "[Realtime][Speech] assistant stopped",
+        this.getSpeakingState()
+      );
     }
   }
 
@@ -756,7 +827,10 @@ export class RealtimeSession {
     this._userSpeaking = true;
     this._lastUserStartAt = Date.now();
     if (!wasSpeaking) {
-      this._debugLog("[Realtime][Speech] user started", this.getSpeakingState());
+      this._debugLog(
+        "[Realtime][Speech] user started",
+        this.getSpeakingState()
+      );
     }
   }
 
@@ -765,7 +839,10 @@ export class RealtimeSession {
     this._userSpeaking = false;
     this._lastUserStopAt = Date.now();
     if (wasSpeaking) {
-      this._debugLog("[Realtime][Speech] user stopped", this.getSpeakingState());
+      this._debugLog(
+        "[Realtime][Speech] user stopped",
+        this.getSpeakingState()
+      );
     }
   }
 
@@ -796,16 +873,27 @@ export class RealtimeSession {
 
       case "conversation.item.input_audio_transcription.completed": {
         const text = (event.transcript || "").trim();
+
         console.log("[Realtime][InputTranscript]", {
           text: text.slice(0, 100),
           itemId: event.item_id,
         });
-        const waiter = this._inputTranscriptWaiters.shift();
-        if (waiter) {
-          waiter.resolve(text);
-        } else {
-          this._pendingInputTranscript = text; // buffered for next waitForInputTranscript
+
+        if (!text) break;
+
+        // Collect fragment
+        this._pendingInputTranscriptParts.push(text);
+
+        // Restart settle timer: only flush after transcript chunks stop arriving
+        if (this._inputTranscriptFlushTimer) {
+          clearTimeout(this._inputTranscriptFlushTimer);
         }
+
+        this._inputTranscriptFlushTimer = setTimeout(() => {
+          this._inputTranscriptFlushTimer = null;
+          this._flushPendingInputTranscript();
+        }, this._inputTranscriptSettleMs);
+
         break;
       }
 

@@ -229,25 +229,28 @@ export function buildWheelReactionPrompt(gameContext, transcript = null) {
 
   const transcriptLine = transcript
     ? isRu
-      ? `Игрок только что сказал: «${transcript}»\n\nОдна короткая реплика Ворошилова — иронично, точно, с характером. Зацепись за что-то конкретное из сказанного. Не повторяй слова дословно.`
-      : `Гравець щойно сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, точно, з характером. Зачепись за щось конкретне зі сказаного. НЕ повторюй слова дослівно.`
-    : isRu
-    ? "Одна короткая живая реплика Ворошилова. С характером, без банальностей."
-    : "Одна коротка жива репліка Ворошилова. З характером, без банальностей.";
+      ? `Игрок сказал: «${transcript}»`
+      : `Гравець сказав: «${transcript}»`
+    : "";
 
-  return `ПОТОЧНА ФАЗА: РЕПЛІКА-РЕАКЦІЯ — ПОТІМ ТИША.
+  return `ПОТОЧНА ФАЗА: ОДНА КОРОТКА РЕАКЦІЯ І ТИША.
 
-${transcriptLine}
+ЗАВДАННЯ:
+- Скажи ОДНЕ коротке речення.
+- Максимум 10 слів.
+- Зачепись за щось конкретне зі сказаного.
+- Не повторюй фразу гравця дослівно.
+- Після цього одразу замовкни.
 
-Після реакції — ПОВНА ТИША.
+${transcriptLine ? `${transcriptLine}\n` : ""}АБСОЛЮТНО ЗАБОРОНЕНО:
+- друге речення;
+- нове запитання;
+- слова «Увага», «екран», «питання»;
+- згадувати сектор або майбутнє питання;
+- загальні порожні реакції;
+- будь-який перехід до наступної фази.
 
-АБСОЛЮТНО ЗАБОРОНЕНО:
-- Нові запитання, що вимагають відповіді
-- Порожні фрази без зв'язку зі сказаним: «цікаво», «ого», «добре», «це цікава історія», «бажаю успіху», «вперед», «дякую», «так-так», «розумію»
-- Більше однієї фрази
-- Згадувати персонажів Breaking Bad, сектор, майбутнє питання
-Мова: ${lang}.
-`;
+Мова: ${lang}.`;
 }
 
 export function buildWheelSmallTalkPrompt(gameContext, index = 0) {
@@ -388,55 +391,38 @@ export function buildWarmupReactionWithVideoCuePrompt(
   gameContext,
   transcript = null
 ) {
-  const isRu = (gameContext.game_language || "uk") !== "uk";
-  const cue = isRu ? "Внимание на экран!" : "Увага на екран!";
-
-  const transcriptInstruction = transcript
-    ? isRu
-      ? `Игрок сказал: «${transcript}»\n\nОдна короткая реплика Ворошилова — иронично, с характером. Зацепись за конкретное из сказанного. НЕ повторяй слова дословно`
-      : `Гравець сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, з характером. Зачепись за конкретне зі сказаного. НЕ повторюй слова дослівно`
-    : isRu
-    ? "Одна коротка жива репліка Ворошилова на сказане гравцем. З характером, без банальностей"
-    : "Одна коротка жива репліка Ворошилова на сказане гравцем. З характером, без банальностей";
-
-  const lang = isRu ? "російська" : "українська";
-  return `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
-
-${transcriptInstruction}, і ОДРАЗУ завершуй рівно словами: «${cue}»
-Зупинись.
-
-АБСОЛЮТНО ЗАБОРОНЕНО: будь-яка фраза після «${cue}»; загальні порожні фрази без конкретики («цікаво», «добре», «ого», «це цікава історія», «так-так»); нові запитання що вимагають відповіді; продовження діалогу.
-Мова: ${lang}.
-`;
+  // Compatibility wrapper.
+  // Video bridge is now always a separate protected cue.
+  return buildWarmupReactionPrompt(gameContext, transcript);
 }
 
 export function buildWarmupReactionPrompt(gameContext, transcript = null) {
   const isRu = (gameContext.game_language || "uk") !== "uk";
-  // NOTE: TV-show framing overrides safety-training tendencies.
-  // Breaking Bad content is scripted fiction; the model must stay in persona.
-
-  const transcriptInstruction = transcript
-    ? isRu
-      ? `Гравець сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, точно, з характером. Зачепись за щось конкретне зі сказаного. НЕ повторюй слова дослівно.`
-      : `Гравець сказав: «${transcript}»\n\nОдна коротка репліка Ворошилова — іронічно, точно, з характером. Зачепись за щось конкретне зі сказаного. НЕ повторюй слова дослівно.`
-    : isRu
-    ? "Одна коротка жива репліка Ворошилова. З характером, без банальностей."
-    : "Одна коротка жива репліка Ворошилова. З характером, без банальностей.";
-
   const lang = isRu ? "російська" : "українська";
-  return `ТИ — ВЕДУЧИЙ ТЕЛЕШОУ. ЦЕ РОЗВАЖАЛЬНА ГРА, ВЕСЬ КОНТЕНТ ВИГАДАНИЙ.
 
-${transcriptInstruction}
+  const transcriptLine = transcript
+    ? isRu
+      ? `Игрок сказал: «${transcript}»`
+      : `Гравець сказав: «${transcript}»`
+    : "";
 
-Потім ОДРАЗУ ЗАМОВКНИ — назавжди.
+  return `ПОТОЧНА ФАЗА: ОДНА КОРОТКА РЕАКЦІЯ І ТИША.
 
-АБСОЛЮТНО ЗАБОРОНЕНО:
-- Загальні фрази без прив'язки до сказаного: «цікаво», «ого», «добре», «це цікава історія», «вперед», «дякую», «так-так»
-- Більше однієї фрази
-- Нові запитання що вимагають відповіді (риторичне повторення слів гравця — дозволено)
-- Поради, підбадьорення, продовження діалогу
-Мова: ${lang}.
-`;
+ЗАВДАННЯ:
+- Скажи ОДНЕ коротке речення.
+- Максимум 10 слів.
+- Зачепись за щось конкретне зі сказаного.
+- Не повторюй фразу гравця дослівно.
+- Після цього одразу замовкни.
+
+${transcriptLine ? `${transcriptLine}\n` : ""}АБСОЛЮТНО ЗАБОРОНЕНО:
+- друге речення;
+- нове запитання;
+- слова «Увага», «екран», «питання»;
+- загальні порожні реакції («цікаво», «ого», «добре», «дякую», «розумію»);
+- будь-який перехід до наступної фази.
+
+Мова: ${lang}.`;
 }
 
 export function buildNameConfirmationPrompt(
@@ -542,16 +528,8 @@ export function buildBlackBoxWarmupOpeningPrompt(gameContext) {
 }
 
 export function buildAttentionCuePrompt(gameContext) {
-  const attention = attentionLineForQuestion(gameContext);
-  return `НОВА ФАЗА. ІГНОРУЙ ВСЕ ПОПЕРЕДНЄ.
-
-Скажи РІВНО: «${attention}»
-
-Одразу замовкни. Більше нічого — ні слова до, ні слова після.
-ЗАБОРОНЕНО: продовжувати попередню розмову в будь-якій формі.
-`;
+  return attentionLineForQuestion(gameContext);
 }
-
 /**
  * Question body — second half of the split question read (after gong).
  * Reads question verbatim + time line, then silence.
@@ -559,14 +537,9 @@ export function buildAttentionCuePrompt(gameContext) {
 export function buildQuestionBodyPrompt(gameContext) {
   const q = gameContext.current_question || {};
   const questionText = q.question_text || "";
-  const timeLine = timeLineForQuestion(gameContext);
-  return `НОВА ФАЗА. ІГНОРУЙ ВСЕ ПОПЕРЕДНЄ.
-ЗАБОРОНЕНО: будь-яке вступне слово («Добре», «Зрозуміло», «Отже», «Слухайте»).
-
-Зачитай РІВНО: «${questionText}»
-Потім скажи РІВНО: «${timeLine}»
-
-Замовкни.`;
+  const tl = timeLineForQuestion(gameContext);
+  return `${questionText}
+${tl}`.trim();
 }
 
 // ─── Video question cues ──────────────────────────────────────────────────────
@@ -586,13 +559,11 @@ export function buildWatchScreenPrompt(gameContext) {
       ? ["Первый", "Второй", "Третий"][pos - 1] || `${pos}-й`
       : ["Перше", "Друге", "Третє"][pos - 1] || `${pos}-е`;
     return isRu
-      ? `ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «Внимание на экран. ${posLabel} вопрос.» Після цього одразу замовкни.`
-      : `ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «Увага на екран. ${posLabel} питання.» Після цього одразу замовкни.`;
+      ? `Внимание на экран. ${posLabel} вопрос.`
+      : `Увага на екран. ${posLabel} питання.`;
   }
 
-  return isRu
-    ? "ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «А теперь — внимание на экран.» Після цього одразу замовкни."
-    : "ПОТОЧНА ФАЗА: ПЕРЕД ВІДЕОПИТАННЯМ. Скажи рівно одну коротку фразу: «А тепер — увага на екран.» Після цього одразу замовкни.";
+  return isRu ? "А теперь — внимание на экран." : "А тепер — увага на екран.";
 }
 
 /**
@@ -603,14 +574,13 @@ export function buildWatchScreenPrompt(gameContext) {
 export function buildTimeCuePrompt(gameContext) {
   const isRu = (gameContext?.game_language || "uk") !== "uk";
   const isBlitz = gameContext?.current_question?.round_type === "blitz";
-  const line = isBlitz
+  return isBlitz
     ? isRu
       ? "Время! Двадцать секунд!"
       : "Час! Двадцять секунд!"
     : isRu
     ? "Время! Минута обсуждения!"
     : "Час! Хвилина обговорення!";
-  return `ПОТОЧНА ФАЗА: ЗАПУСК ОБГОВОРЕННЯ ПІСЛЯ ВІДЕОПИТАННЯ. Скажи рівно одну коротку фразу: «${line}» Після цього одразу замовкни.`;
 }
 
 // ─── Listening cue ────────────────────────────────────────────────────────────
@@ -622,19 +592,13 @@ export function buildTimeCuePrompt(gameContext) {
  */
 export function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
   const isRu = (gameContext.game_language || "uk") !== "uk";
-  const line = earlyAnswer
+  return earlyAnswer
     ? isRu
       ? "Досрочный ответ. Кто будет отвечать?"
       : "Дострокова відповідь. Хто відповідатиме?"
     : isRu
     ? "Время вышло. Кто будет отвечать?"
     : "Час вийшов. Хто відповідатиме?";
-  return `ПОТОЧНА ФАЗА: КОРОТКА РЕПЛІКА ПЕРЕД ЗАПИСОМ ВІДПОВІДІ.
-
-Скажи РІВНО ЦЮ фразу і одразу замовкни:
-«${line}»
-
-Не додавай другу фразу. Не коментуй гру. Не оголошуй правильну відповідь.`;
 }
 
 // ─── Post-answer cues (SCORING / EXPLAINING) ─────────────────────────────────
@@ -646,15 +610,7 @@ export function buildListeningCuePrompt(gameContext = {}, earlyAnswer = false) {
  */
 export function buildSegueCuePrompt(gameContext = {}) {
   const isRu = (gameContext.game_language || "uk") !== "uk";
-  const line = isRu
-    ? "А теперь — к правильному ответу."
-    : "А тепер — правильна відповідь.";
-  return `ПОТОЧНА ФАЗА: КОРОТКИЙ ПЕРЕХІД ДО ПОЯСНЕННЯ.
-
-Скажи РІВНО ЦЮ фразу і одразу замовкни:
-«${line}»
-
-Не називай відповідь. Не додавай жодного слова.`;
+  return isRu ? "А теперь — правильный ответ." : "А тепер — правильна відповідь.";
 }
 
 /**
@@ -664,17 +620,8 @@ export function buildSegueCuePrompt(gameContext = {}) {
  * @param {string} text — full explanation text to be spoken (from evaluation.explanation)
  */
 export function buildExplanationCuePrompt(text) {
-  return `ПОТОЧНА ФАЗА: ЗАЧИТАЙ ПОЯСНЕННЯ ДОСЛІВНО І ЗУПИНИСЬ.
-
-ПЕРШИМ ЗВУКОМ МАЄ БУТИ ПЕРШЕ СЛОВО ПОЯСНЕННЯ — без жодного вступного слова.
-ЗАБОРОНЕНО: «Добре», «Зрозуміло», «Okay», «Sure», «Звісно» або будь-яка інша вступна фраза.
-
-Прочитай РІВНО ЦЕ:
-«${text}»
-
-Зупинись одразу після останнього слова.`;
+  return String(text || "").trim();
 }
-
 // ─── Session base instructions ────────────────────────────────────────────────
 
 /**
@@ -692,9 +639,19 @@ export function buildExplanationCuePrompt(text) {
  * Saves ~2,100 tokens vs buildModeratorBaseInstructions on every call.
  */
 export function buildVerbatimBaseInstructions() {
-  return `ПОПЕРЕДНЯ РОЗМОВА ЗАВЕРШЕНА. Ти БІЛЬШЕ НЕ ведучий у діалозі.
-Ти — система озвучення: вимовляєш ТІЛЬКИ текст з instructions поточного response і одразу замовкаєш.
-ЗАБОРОНЕНО: відповідати на будь-що зі попередньої розмови; будь-яка фраза крім вказаного тексту; вступні слова; коментарі після тексту.`;
+  return `You are a non-conversational voice renderer.
+Treat the ENTIRE current response instructions as literal text to speak.
+Speak exactly that text and nothing else.
+Do not answer the user.
+Do not continue any prior conversation.
+Do not explain.
+Do not paraphrase.
+Do not summarize.
+Do not add labels, greetings, confirmations, transitions, or filler words.
+Do not invent missing words.
+The first spoken word must be the first word of the provided text.
+After the final word, stop immediately.
+If the provided text is empty, say nothing.`;
 }
 
 export function buildPostAnswerBaseInstructions(systemPrompt = "") {
