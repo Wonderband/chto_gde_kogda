@@ -180,6 +180,7 @@ export function useGamePhaseEffects({
   playersRef,
   closePreSession,
   closePostSession,
+  musicPausePlaying,
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
@@ -797,12 +798,13 @@ export function useGamePhaseEffects({
     };
   }, [gameState, evaluation, currentQuestion, score]);
 
-  // ── READY: loop pause music while waiting for next round ────────────────────
+  // ── READY: loop pause music; stop while music-pause video is playing ─────────
   useEffect(() => {
     if (gameState !== STATES.READY) return;
+    if (musicPausePlaying) return;
     const { stop } = playLooped("/sounds/pause.mp3", { volume: SOUND_VOLUMES.pause });
     return stop;
-  }, [gameState]);
+  }, [gameState, musicPausePlaying]);
 
   // ── GAME_OVER: loop final music until restart ────────────────────────────────
   useEffect(() => {
