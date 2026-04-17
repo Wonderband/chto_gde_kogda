@@ -198,6 +198,8 @@ export function useGamePhaseEffects({
     }
   }
 
+  // Full context — only for the evaluator (Session 2 evaluation).
+  // Contains correct_answer and hint so the AI can judge the team's answer.
   function buildCtx(extra = {}) {
     return {
       round_number: roundNumber,
@@ -228,6 +230,26 @@ export function useGamePhaseEffects({
       game_language: GAME_LANGUAGE,
       retry_attempt: state.retryCount ?? 0,
       ...extra,
+    };
+  }
+
+  // Dialogue context — for warmup and listening-cue sessions only.
+  // Deliberately excludes correct_answer, hint_for_evaluator, answer_variants,
+  // and question_text so those fields can never reach a dialogue-phase prompt.
+  function buildDialogueCtx() {
+    return {
+      round_number: roundNumber,
+      sector_number: (selectedSector ?? 0) + 1,
+      game_language: GAME_LANGUAGE,
+      current_question: currentQuestion
+        ? {
+            character: currentQuestion.character,
+            intro_flavor: currentQuestion.intro_flavor,
+            item_to_announce: currentQuestion.item_to_announce,
+            round_type: currentQuestion.round_type,
+            blitz_position: currentQuestion.blitz_position,
+          }
+        : null,
     };
   }
 
@@ -309,8 +331,10 @@ export function useGamePhaseEffects({
         closePreSession();
 
         const session = new RealtimeSession();
-        session.onError = (err) =>
+        session.onError = (err) => {
           console.error("[Moderator session error]", err.message);
+          closePreSession();
+        };
         // NOTE: onTriggerPhrase intentionally NOT set here — trigger phrases
         // like "увага питання" must not interrupt the spinning dialogue.
 
@@ -417,8 +441,10 @@ export function useGamePhaseEffects({
             let warmupSession = null;
             try {
               warmupSession = new RealtimeSession();
-              warmupSession.onError = (err) =>
+              warmupSession.onError = (err) => {
                 console.error("[Warmup session error]", err.message);
+                try { warmupSession?.close(); } catch {}
+              };
               await warmupSession.open({
                 apiKey,
                 systemPrompt: systemPromptRef.current,
@@ -429,7 +455,7 @@ export function useGamePhaseEffects({
                 await runSessionOneFlow({
                   session: warmupSession,
                   systemPrompt: systemPromptRef.current,
-                  gameContext: buildCtx(),
+                  gameContext: buildDialogueCtx(),
                   warmupTimeoutMs: 6000,
                 });
               }
@@ -466,6 +492,8 @@ export function useGamePhaseEffects({
         if (!cancelled) send(EVENTS.READING_DONE);
       } catch (e) {
         console.error("[READING deterministic flow failed]", e);
+        // Guarantee progression — game must never stay stuck in READING
+        if (!cancelled) send(EVENTS.READING_DONE);
       }
     })();
 
@@ -529,8 +557,10 @@ export function useGamePhaseEffects({
               let session = postSessionRef.current;
               if (!session) {
                 session = new RealtimeSession();
-                session.onError = (err) =>
+                session.onError = (err) => {
                   console.error("[Session2 cue error]", err.message);
+                  closePostSession();
+                };
                 await session.open({
                   apiKey,
                   systemPrompt: systemPromptRef.current,
@@ -543,7 +573,7 @@ export function useGamePhaseEffects({
               await playListeningCue({
                 session,
                 systemPrompt: systemPromptRef.current,
-                gameContext: buildCtx(),
+                gameContext: buildDialogueCtx(),
                 earlyAnswer: state.earlyAnswer,
               });
             } else {
