@@ -17,6 +17,7 @@ export function useKeyboardControls({
   selectedSector,
   roundNumber,
   currentQuestion,
+  onMusicPause,
 }) {
   const gameStateRef = useRef(gameState);
   const isRecordingRef = useRef(isRecording);
@@ -70,6 +71,10 @@ export function useKeyboardControls({
           if (gs === STATES.LISTENING && isRecordingRef.current) {
             doStopRef.current?.();
           }
+          break;
+
+        case "KeyM":
+          if (gs === STATES.READY) onMusicPause?.();
           break;
 
         case "KeyR":

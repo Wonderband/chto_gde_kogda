@@ -48,6 +48,8 @@ export const REALTIME_VOICE = e.VITE_REALTIME_VOICE || "echo";
 export const TTS_MODEL = e.VITE_TTS_MODEL || "gpt-4o-mini-tts";
 /** TTS voice */
 export const TTS_VOICE = e.VITE_TTS_VOICE || "onyx";
+/** Extra playback gain for TTS audio (can be > 1.0 via Web Audio). */
+export const TTS_OUTPUT_GAIN = Number(e.VITE_TTS_OUTPUT_GAIN) || 1.65;
 /** Speech-to-text model for team answer transcription */
 export const TRANSCRIBE_MODEL =
   e.VITE_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
@@ -66,9 +68,11 @@ export const FAST_EVALUATOR_MODEL =
  * Increase if speech is cut off; decrease to save cost.
  */
 export const TOKENS = {
-  WHEEL_OPENING: 350, // spinning phase opener            (~6–7 s, player-specific banter + reaction)
+  WHEEL_OPENING: 320, // spinning phase opener            (~5–6 s, short one-line opener)
+  WHEEL_REACTION: 120, // spinning phase reaction           (~1–2 s, tiny quip)
+  WARMUP_OPENING: 520, // verbatim intro_flavor opener      (leave room for long source text)
   COMBINED_INTRO: 600, // sector + character + intro_flavor (~10 s, one combined monologue)
-  WARMUP_REACTION: 200, // warmup reaction phrase            (~3 s; +video cue when needed)
+  WARMUP_REACTION: 120, // warmup reaction phrase            (~1–2 s, tiny quip)
   VIDEO_CUE: 150, // "увага на екран" / "Час! Двадцять секунд!" (~2 s, 3–5 words max)
   ATTENTION_CUE: 400, // "Увага! Питання!" or blitz announcement  (~6 s, up to ~15 words for blitz)
   LISTENING_CUE: 220, // "Час вийшов. Хто відповідатиме?"         (~4–5 s)

@@ -4,20 +4,16 @@ import {
   RealtimeSession,
   startWheelDialogue,
   runSessionOneFlow,
-  finishVideoQuestionFlow,
 } from "../services/realtime";
 import {
   playListeningCue,
   evaluateSessionTwo,
-  playNeutralSegueCue,
-  playExplanationCue,
 } from "../services/realtime.session2";
 import { speak } from "../services/tts";
 import { startRecording } from "../services/recorder";
 import {
   readQuestion,
   evaluateAnswer,
-  buildListeningScript,
 } from "../services/openai";
 import {
   GAME_LANGUAGE,
@@ -25,9 +21,11 @@ import {
   WHEEL_DIALOGUE_DELAY_MS,
   VIDEO_TO_SPEECH_DELAY_MS,
   SOUND_VOLUMES,
+  SPIN_DURATION_MS,
 } from "../config.js";
 import { playGong, playBlackBoxMusic, playLooped } from "../utils/sounds.js";
 import { timeLine, blitzPositionLabel } from "../game/gameText.js";
+import { getCharacterIntro } from "../data/characters.js";
 
 const ORDINALS_UK = [
   "Перший", "Другий", "Третій", "Четвертий", "П'ятий",
@@ -53,13 +51,52 @@ function isVideoQuestion(question) {
   return question?.presentation_mode === "video" && !!question?.video_src;
 }
 
+function buildSectorIntroText(question, sectorNumber, lang) {
+  const isRu = lang === "ru";
+  const sector = sectorNumber ?? 1;
+  const { displayName, intro } = getCharacterIntro(question?.character || "", lang);
+  const heroName = displayName || question?.character || (isRu ? "неизвестный герой" : "невідомий герой");
+  const vsLine = isRu
+    ? `Против знатоков играет ${heroName}.`
+    : `Проти знавців грає ${heroName}.`;
+  return [isRu ? `Сектор ${sector}.` : `Сектор ${sector}.`, vsLine, intro].filter(Boolean).join(" ");
+}
+
+function buildAttentionCueText(question, lang) {
+  const isRu = lang === "ru";
+  if (question?.round_type !== "blitz") {
+    return isRu ? "Внимание! Вопрос!" : "Увага! Питання!";
+  }
+  const label = blitzPositionLabel(question?.blitz_position || 1, lang);
+  return isRu ? `Внимание! ${label} вопрос!` : `Увага! ${label} питання!`;
+}
+
+function buildQuestionBodyText(question, lang) {
+  return lang === "ru" ? (question?.question_ru || "") : (question?.question_uk || "");
+}
+
+function buildTextQuestionIntroText(question, sectorNumber, lang) {
+  const isRu = lang === "ru";
+  const pos = question?.blitz_position || 1;
+  if (question?.round_type === "blitz" && pos > 1) {
+    return "";
+  }
+  if (question?.round_type === "blitz") {
+    const rules = isRu
+      ? `Сектор ${sectorNumber ?? 1}. Сектор Блиц! Три вопроса. Двадцать секунд на каждый.`
+      : `Сектор ${sectorNumber ?? 1}. Сектор Бліц! Три питання. Двадцять секунд на кожне.`;
+    const heroIntro = buildSectorIntroText(question, sectorNumber, lang)
+      .replace(/^Сектор \d+\.\s*/, "")
+      .trim();
+    return [rules, heroIntro].filter(Boolean).join(" ");
+  }
+  return buildSectorIntroText(question, sectorNumber, lang);
+}
+
 function buildVideoFullIntroFallbackText(question, sectorNumber, lang) {
   const isRu = lang === "ru";
-  const character = question?.character || "";
-  const sector = sectorNumber ?? 1;
   const pos = question?.blitz_position || 1;
 
-  // Blitz Q2/Q3: sector+character already announced for Q1 — skip intro
   if (question?.round_type === "blitz" && pos > 1) {
     const posLabel = isRu
       ? ["Первый", "Второй", "Третий"][pos - 1] || `${pos}-й`
@@ -69,25 +106,29 @@ function buildVideoFullIntroFallbackText(question, sectorNumber, lang) {
       : `Увага на екран. ${posLabel} питання.`;
   }
 
-  return isRu
-    ? `Сектор ${sector}. Вопрос от ${character}. А теперь — внимание на экран.`
-    : `Сектор ${sector}. Питання від ${character}. А тепер — увага на екран.`;
+  return buildSectorIntroText(question, sectorNumber, lang);
 }
 
-// Thin alias kept for call-site readability — delegates to shared gameText helper.
 function buildVideoTimeCueFallbackText(question, lang) {
   return timeLine(question, lang);
 }
 
-/**
- * Builds the full spoken explanation text from hard-coded material — no AI generation.
- * Structure: hint_for_evaluator (verbatim) → verdict sentence → score sentence.
- */
-function buildSpeechText(q, evaluation, score, blitzQueue, lang) {
+function buildListeningCueFallbackText(earlyAnswer, lang) {
+  const isRu = lang === "ru";
+  if (earlyAnswer) {
+    return isRu
+      ? "Досрочный ответ. Тишина в студии! Кто будет отвечать?"
+      : "Дострокова відповідь. Тиша в студії! Хто відповідатиме?";
+  }
+  return isRu
+    ? "Время! Тишина в студии! Кто будет отвечать?"
+    : "Час! Тиша в студії! Хто відповідатиме?";
+}
+
+function buildExplanationBodyText(q, evaluation, lang) {
   const isUk = lang !== "ru";
-  const hint = q?.hint_for_evaluator || "";
-  const correct = evaluation.correct;
-  const isBlitzIntermediate = evaluation.blitz_intermediate;
+  const hint = (q?.hint_for_evaluator || "").trim();
+  const correct = !!evaluation?.correct;
 
   const verdictLine = correct
     ? isUk
@@ -97,18 +138,30 @@ function buildSpeechText(q, evaluation, score, blitzQueue, lang) {
     ? "На жаль, знавці помилилися."
     : "К сожалению, знатоки ошиблись.";
 
-  let scoreLine;
+  return [hint, verdictLine].filter(Boolean).join(" ").trim();
+}
+
+function buildScoreAnnouncementText(evaluation, score, lang) {
+  const isUk = lang !== "ru";
+  const isBlitzIntermediate = !!evaluation?.blitz_intermediate;
+
   if (isBlitzIntermediate) {
-    scoreLine = isUk ? "Продовжуємо бліц!" : "Продолжаем блиц!";
-  } else {
-    const newExperts = score.experts + (correct ? 1 : 0);
-    const newViewers = score.viewers + (correct ? 0 : 1);
-    scoreLine = isUk
-      ? `Рахунок стає ${newExperts}:${newViewers}.`
-      : `Счёт становится ${newExperts}:${newViewers}.`;
+    return isUk ? "Продовжуємо бліц!" : "Продолжаем блиц!";
   }
 
-  return [hint, verdictLine, scoreLine].filter(Boolean).join(" ");
+  const correct = !!evaluation?.correct;
+  const newExperts = score.experts + (correct ? 1 : 0);
+  const newViewers = score.viewers + (correct ? 0 : 1);
+  return isUk
+    ? `Рахунок стає ${newExperts}:${newViewers}.`
+    : `Счёт становится ${newExperts}:${newViewers}.`;
+}
+
+function buildSpeechText(q, evaluation, score, blitzQueue, lang) {
+  return [
+    buildExplanationBodyText(q, evaluation, lang),
+    buildScoreAnnouncementText(evaluation, score, lang),
+  ].filter(Boolean).join(" ");
 }
 
 export function useGamePhaseEffects({
@@ -127,6 +180,7 @@ export function useGamePhaseEffects({
   playersRef,
   closePreSession,
   closePostSession,
+  musicPausePlaying,
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
@@ -184,27 +238,17 @@ export function useGamePhaseEffects({
     if (videoFinishInFlightRef.current) return;
 
     videoFinishInFlightRef.current = true;
-    setVideoReady(false); // hide backdrop before speaking — video gone first, then cue
-    await new Promise((r) => setTimeout(r, VIDEO_TO_SPEECH_DELAY_MS)); // brief pause to let backdrop exit
+    setVideoReady(false);
+    await new Promise((r) => setTimeout(r, VIDEO_TO_SPEECH_DELAY_MS));
 
     try {
-      if (!USE_MOCK && preSessionRef.current && systemPromptRef.current) {
-        await finishVideoQuestionFlow({
-          session: preSessionRef.current,
-          systemPrompt: systemPromptRef.current,
-          gameContext: buildCtx(),
-        });
-      } else {
-        await tts(
-          buildVideoTimeCueFallbackText(currentQuestion, GAME_LANGUAGE)
-        );
-      }
+      const timeCueText = buildVideoTimeCueFallbackText(currentQuestion, GAME_LANGUAGE);
+      if (timeCueText) await tts(timeCueText, { voice: REALTIME_VOICE });
     } catch (err) {
       console.error("[Video question finish failed]", err);
     } finally {
       awaitingVideoEndRef.current = false;
       videoFinishInFlightRef.current = false;
-      closePreSession();
       send(EVENTS.READING_DONE);
     }
   }
@@ -257,6 +301,8 @@ export function useGamePhaseEffects({
 
     let cancelled = false;
 
+    const spinEffectStartedAt = Date.now();
+
     (async () => {
       try {
         console.log("[App][SPINNING effect:start]");
@@ -272,7 +318,7 @@ export function useGamePhaseEffects({
           apiKey: import.meta.env.VITE_OPENAI_API_KEY,
           systemPrompt: systemPromptRef.current,
           voice: REALTIME_VOICE,
-          enableMic: true,
+          enableMic: false,
         });
 
         if (cancelled) {
@@ -283,6 +329,8 @@ export function useGamePhaseEffects({
         preSessionRef.current = session;
         console.log("[App][Spin session ready]");
 
+        const spinDeadlineAt = spinEffectStartedAt + SPIN_DURATION_MS - 1200;
+
         await startWheelDialogue(
           session,
           systemPromptRef.current,
@@ -292,7 +340,10 @@ export function useGamePhaseEffects({
             game_language: GAME_LANGUAGE,
             players: playersRef?.current || [],
           },
-          { delayMs: WHEEL_DIALOGUE_DELAY_MS }
+          {
+            delayMs: WHEEL_DIALOGUE_DELAY_MS,
+            deadlineAt: spinDeadlineAt,
+          }
         );
 
         if (cancelled) return;
@@ -306,6 +357,7 @@ export function useGamePhaseEffects({
     return () => {
       cancelled = true;
       music.pause();
+      closePreSession();
     };
   }, [gameState, roundNumber, score.experts, score.viewers]);
 
@@ -325,137 +377,76 @@ export function useGamePhaseEffects({
       videoMode: isVideoQuestion(currentQuestion),
     });
 
-    if (!USE_MOCK) {
-      let cancelled = false;
-
-      (async () => {
-        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-        if (!apiKey || !systemPromptRef.current) return;
-
-        const openFreshReadSession = async () => {
-          const readSession = new RealtimeSession();
-          readSession.onError = (err) =>
-            console.error("[Moderator session error]", err.message);
-          await readSession.open({
-            apiKey,
-            systemPrompt: systemPromptRef.current,
-            voice: REALTIME_VOICE,
-            enableMic: true,
-          });
-          return readSession;
-        };
-
-        try {
-          closePreSession();
-          let attempt = 0;
-          let completed = false;
-          let lastErr = null;
-          let waitingForVideoEnd = false;
-
-          while (!completed && attempt < 2 && !cancelled) {
-            attempt += 1;
-            let session = null;
-            let keepSessionOpen = false;
-
-            try {
-              session = await openFreshReadSession();
-              if (cancelled) {
-                session.close();
-                return;
-              }
-
-              preSessionRef.current = session;
-              console.log("[App][Session1 start]", {
-                sector: (selectedSector ?? 0) + 1,
-                currentQuestionId: currentQuestion?.id,
-                freshReadSession: true,
-                attempt,
-              });
-
-              const result = await runSessionOneFlow({
-                session,
-                systemPrompt: systemPromptRef.current,
-                gameContext: buildCtx(),
-                warmupTimeoutMs: 6000,
-              });
-
-              waitingForVideoEnd = !!result?.awaitVideoEnd;
-              keepSessionOpen = waitingForVideoEnd;
-              completed = true;
-            } catch (e) {
-              lastErr = e;
-              console.error("[Session 1 flow failed]", { attempt, error: e });
-            } finally {
-              if (!keepSessionOpen && session) session.close();
-              if (!keepSessionOpen && preSessionRef.current === session) {
-                preSessionRef.current = null;
-              }
-            }
-          }
-
-          if (!completed) {
-            throw (
-              lastErr || new Error("Session 1 read did not complete cleanly")
-            );
-          }
-
-          if (waitingForVideoEnd) {
-            awaitingVideoEndRef.current = true;
-            setVideoReady(true);
-            console.log("[App][Session1 waiting for video end]");
-            return;
-          }
-
-          console.log("[App][Session1 done]");
-          if (!cancelled) send(EVENTS.READING_DONE);
-        } catch (e) {
-          console.error("[Session 1 final failure]", e);
-          closePreSession();
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-        if (!awaitingVideoEndRef.current) {
-          closePreSession();
-        }
-      };
-    }
+    closePreSession();
 
     let cancelled = false;
     (async () => {
       try {
         const isBlackBox = currentQuestion?.round_type === "black_box";
+        const isItemAnnounce = !!currentQuestion?.item_to_announce;
+        const isVideo = isVideoQuestion(currentQuestion);
         const sector = (selectedSector ?? 0) + 1;
         const isRu = GAME_LANGUAGE === "ru";
+        const watchScreenCue = isRu ? "Внимание на экран!" : "Увага на екран!";
+        const blackBoxCue = isRu ? "Внимание, чёрный ящик!" : "Увага, чорний ящик!";
+        const itemCue = currentQuestion?.item_to_announce || "";
+        const introLine = isVideo
+          ? buildVideoFullIntroFallbackText(currentQuestion, sector, GAME_LANGUAGE)
+          : buildTextQuestionIntroText(currentQuestion, sector, GAME_LANGUAGE);
+        const shouldWarmup = !!currentQuestion?.intro_flavor &&
+          !(currentQuestion?.round_type === "blitz" && (currentQuestion?.blitz_position || 1) > 1);
 
-        if (isVideoQuestion(currentQuestion)) {
-          if (isBlackBox) {
-            // Black box: intro → "Увага, чорний ящик!" → music → flavor question → gong → "Увага на екран!"
-            const blackBoxCue = isRu ? "Внимание, чёрный ящик!" : "Увага, чорний ящик!";
-            const screenCue = isRu ? "Внимание на экран!" : "Увага на екран!";
-            const character = currentQuestion.character || "";
-            const introLine = isRu
-              ? `Сектор ${sector}. Вопрос от ${character}. ${blackBoxCue}`
-              : `Сектор ${sector}. Питання від ${character}. ${blackBoxCue}`;
-            await tts(introLine);
-            if (!cancelled) await playBlackBoxMusic();
-            // After music: read flavor question aloud (no player response in mock mode)
-            if (!cancelled && currentQuestion.intro_flavor) {
-              await tts(currentQuestion.intro_flavor);
+        // 1. TTS sector+hero intro — always, for all question types
+        if (introLine && !cancelled) {
+          await tts(introLine, { voice: REALTIME_VOICE });
+        }
+
+        // 2. Black box / item_announce structural cues + music via TTS
+        if (isBlackBox && !cancelled) {
+          await tts(blackBoxCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playBlackBoxMusic();
+        } else if (isItemAnnounce && !cancelled) {
+          await playBlackBoxMusic();
+          if (!cancelled && itemCue) await tts(itemCue, { voice: REALTIME_VOICE });
+        }
+
+        // 3. Warmup mini-dialog (Realtime, optional) — same format as spin dialog
+        if (!cancelled && !USE_MOCK && shouldWarmup) {
+          const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+          if (apiKey && systemPromptRef.current) {
+            let warmupSession = null;
+            try {
+              warmupSession = new RealtimeSession();
+              warmupSession.onError = (err) =>
+                console.error("[Warmup session error]", err.message);
+              await warmupSession.open({
+                apiKey,
+                systemPrompt: systemPromptRef.current,
+                voice: REALTIME_VOICE,
+                enableMic: false,
+              });
+              if (!cancelled) {
+                await runSessionOneFlow({
+                  session: warmupSession,
+                  systemPrompt: systemPromptRef.current,
+                  gameContext: buildCtx(),
+                  warmupTimeoutMs: 6000,
+                });
+              }
+            } catch (err) {
+              console.error("[Warmup dialogue failed — continuing to protected read]", err);
+            } finally {
+              try { warmupSession?.close(); } catch {}
             }
-            if (!cancelled) await playGong();
-            if (!cancelled) await tts(screenCue);
-          } else {
-            await tts(
-              buildVideoFullIntroFallbackText(
-                currentQuestion,
-                sector,
-                GAME_LANGUAGE
-              )
-            );
-            if (!cancelled) await playGong();
           }
+        }
+
+        if (cancelled) return;
+
+        // 4. Deterministic TTS flow — always runs after warmup (or if warmup skipped/failed)
+        if (isVideo) {
+          await tts(watchScreenCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playGong();
           if (!cancelled) {
             awaitingVideoEndRef.current = true;
             setVideoReady(true);
@@ -463,37 +454,24 @@ export function useGamePhaseEffects({
           return;
         }
 
-        // Text question: split at attention cue to insert gong
-        const { text, responseId } = await readQuestion(
-          buildCtx(),
-          state.lastResponseId
-        );
-        if (cancelled) return;
-        if (responseId) send("SET_LAST_RESPONSE_ID", responseId);
+        const attentionLine = buildAttentionCueText(currentQuestion, GAME_LANGUAGE);
+        const questionBody = buildQuestionBodyText(currentQuestion, GAME_LANGUAGE);
+        const discussionLine = timeLine(currentQuestion, GAME_LANGUAGE);
 
-        const attentionKw = isRu ? "Внимание! Вопрос!" : "Увага! Питання!";
-        const splitIdx = text.indexOf(attentionKw);
-        if (splitIdx !== -1) {
-          const before = text.slice(0, splitIdx + attentionKw.length).trim();
-          const after = text.slice(splitIdx + attentionKw.length).trim();
-          if (before) await tts(before);
-          await playGong();
-          if (after && !cancelled) await tts(after);
-        } else {
-          // Blitz or unrecognised format: gong then full text
-          await playGong();
-          if (!cancelled) await tts(text);
-        }
+        if (attentionLine && !cancelled) await tts(attentionLine, { voice: REALTIME_VOICE });
+        if (!cancelled) await playGong();
+        if (questionBody && !cancelled) await tts(questionBody, { voice: REALTIME_VOICE });
+        if (discussionLine && !cancelled) await tts(discussionLine, { voice: REALTIME_VOICE });
+
+        if (!cancelled) send(EVENTS.READING_DONE);
       } catch (e) {
-        console.error(e);
-      } finally {
-        if (!cancelled && !isVideoQuestion(currentQuestion)) {
-          send(EVENTS.READING_DONE);
-        }
+        console.error("[READING deterministic flow failed]", e);
       }
     })();
+
     return () => {
       cancelled = true;
+      closePreSession();
     };
   }, [gameState, currentQuestion]);
 
@@ -520,7 +498,7 @@ export function useGamePhaseEffects({
           apiKey,
           systemPrompt: systemPromptRef.current,
           voice: REALTIME_VOICE,
-          enableMic: true,
+          enableMic: false,
         });
         if (cancelled) { session.close(); return; }
         postSessionRef.current = session;
@@ -557,7 +535,7 @@ export function useGamePhaseEffects({
                   apiKey,
                   systemPrompt: systemPromptRef.current,
                   voice: REALTIME_VOICE,
-                  enableMic: true,
+                  enableMic: false,
                 });
                 if (cancelled) { session.close(); return; }
                 postSessionRef.current = session;
@@ -569,7 +547,7 @@ export function useGamePhaseEffects({
                 earlyAnswer: state.earlyAnswer,
               });
             } else {
-              await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
+              await tts(buildListeningCueFallbackText(state.earlyAnswer, GAME_LANGUAGE));
             }
           }
 
@@ -593,7 +571,7 @@ export function useGamePhaseEffects({
     (async () => {
       try {
         if (state.retryCount === 0) {
-          await tts(buildListeningScript(state.earlyAnswer, GAME_LANGUAGE));
+          await tts(buildListeningCueFallbackText(state.earlyAnswer, GAME_LANGUAGE));
         }
         setIsRecording(true);
         recorderRef.current = await startRecording();
@@ -745,106 +723,88 @@ export function useGamePhaseEffects({
   useEffect(() => {
     if (gameState !== STATES.SCORING || !evaluation) return;
 
-    if (!USE_MOCK) {
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      let cancelled = false;
+    let cancelled = false;
 
-      (async () => {
-        try {
-          if (apiKey && systemPromptRef.current) {
-            closePostSession();
-            const session = new RealtimeSession();
-            session.onError = (err) =>
-              console.error("[Session2 segue error]", err.message);
-            await session.open({
-              apiKey,
-              systemPrompt: systemPromptRef.current,
-              voice: REALTIME_VOICE,
-              enableMic: false,
-            });
-            if (cancelled) {
-              session.close();
-              return;
-            }
-            postSessionRef.current = session;
-            await playNeutralSegueCue({
-              session,
-              systemPrompt: systemPromptRef.current,
-              gameContext: buildCtx(),
-            });
-          }
-        } catch (e) {
-          console.error("[SCORING segue failed]", e);
-        } finally {
-          if (!cancelled) send(EVENTS.SCORING_DONE);
-        }
-      })();
+    (async () => {
+      try {
+        const segueText = GAME_LANGUAGE === "ru"
+          ? "А теперь — правильный ответ."
+          : "А тепер — правильна відповідь.";
+        await tts(segueText, { voice: REALTIME_VOICE });
+      } catch (e) {
+        console.error("[SCORING segue failed]", e);
+      } finally {
+        closePostSession();
+        if (!cancelled) send(EVENTS.SCORING_DONE);
+      }
+    })();
 
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    send(EVENTS.SCORING_DONE);
+    return () => {
+      cancelled = true;
+      closePostSession();
+    };
   }, [gameState, evaluation]);
 
   useEffect(() => {
     if (gameState !== STATES.EXPLAINING || !evaluation) return;
 
-    if (!USE_MOCK) {
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      let cancelled = false;
-
-      (async () => {
-        try {
-          await playGong();
-          const session = postSessionRef.current;
-          if (session && apiKey) {
-            await playExplanationCue({
-              session,
-              systemPrompt: systemPromptRef.current || "",
-              evaluation,
-              gameContext: buildCtx(),
-            });
-          } else if (evaluation?.explanation) {
-            // Realtime session didn't open (e.g. 504 from OpenAI) — fall back to TTS
-            console.warn("[EXPLAINING] Realtime session unavailable, falling back to TTS");
-            await speak(evaluation.explanation);
-          }
-        } catch (e) {
-          console.error("[EXPLAINING effect]", e);
-        } finally {
-          closePostSession();
-          if (!cancelled) send(EVENTS.EXPLAINING_DONE);
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-        closePostSession();
-      };
-    }
+    let cancelled = false;
 
     (async () => {
       try {
         await playGong();
-        await tts(
-          evaluation.explanation || evaluation.correct_answer_reveal || ""
+
+        const explanationBody = buildExplanationBodyText(
+          currentQuestion,
+          evaluation,
+          GAME_LANGUAGE
+        ) || (
+          GAME_LANGUAGE === "ru"
+            ? `Правильный ответ: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`
+            : `Правильна відповідь: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`
         );
+
+        const scoreLine = buildScoreAnnouncementText(
+          evaluation,
+          score,
+          GAME_LANGUAGE
+        );
+
+        await tts(explanationBody, { voice: REALTIME_VOICE });
+        if (!cancelled && scoreLine) {
+          await tts(scoreLine, { voice: REALTIME_VOICE });
+        }
       } catch (e) {
-        console.error("[EXPLAINING mock]", e);
+        console.error("[EXPLAINING effect]", e);
+        try {
+          const fallbackAnswer = GAME_LANGUAGE === "ru"
+            ? `Правильный ответ: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`
+            : `Правильна відповідь: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`;
+          if (!cancelled) {
+            await tts(fallbackAnswer, { voice: REALTIME_VOICE });
+          }
+        } catch (fallbackErr) {
+          console.error("[EXPLAINING fallback failed]", fallbackErr);
+        }
       } finally {
-        send(EVENTS.EXPLAINING_DONE);
+        closePostSession();
+        if (!cancelled) send(EVENTS.EXPLAINING_DONE);
       }
     })();
-  }, [gameState, evaluation]);
 
-  // ── READY: loop pause music while waiting for next round ────────────────────
+    return () => {
+      cancelled = true;
+      closePostSession();
+    };
+  }, [gameState, evaluation, currentQuestion, score]);
+
+  // ── READY: loop pause music; stop while music-pause video is playing ─────────
   useEffect(() => {
     if (gameState !== STATES.READY) return;
+    if (musicPausePlaying) return;
     const { stop } = playLooped("/sounds/pause.mp3", { volume: SOUND_VOLUMES.pause });
     return stop;
-  }, [gameState]);
+  }, [gameState, musicPausePlaying]);
 
   // ── GAME_OVER: loop final music until restart ────────────────────────────────
   useEffect(() => {

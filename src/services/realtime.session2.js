@@ -58,86 +58,109 @@ export async function playListeningCue({
   systemPrompt,
   gameContext,
   earlyAnswer = false,
+  skipCuePlayback = false,
+  skipResponderSelection = false,
 }) {
-  await session.setMonologueMode({
-    tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
-  });
+  if (!skipCuePlayback) {
+    await session.setMonologueMode({
+      tools: [],
+      instructions: buildModeratorBaseInstructions(systemPrompt),
+    });
 
-  const created = await session.createResponse({
-    instructions: buildListeningCuePrompt(gameContext, earlyAnswer),
-    tools: [],
-    outputModalities: ["audio"],
-    metadata: { stage: earlyAnswer ? "early_answer_cue" : "time_over_cue" },
-    maxOutputTokens: TOKENS.LISTENING_CUE,
-  });
+    const created = await session.createResponse({
+      instructions: buildListeningCuePrompt(gameContext, earlyAnswer),
+      tools: [],
+      outputModalities: ["audio"],
+      metadata: { stage: earlyAnswer ? "early_answer_cue" : "time_over_cue" },
+      maxOutputTokens: TOKENS.LISTENING_CUE,
+    });
 
-  console.log("[Realtime][Session2] listening cue response created", {
-    responseId: created.responseId,
-    earlyAnswer,
-  });
+    console.log("[Realtime][Session2] listening cue response created", {
+      responseId: created.responseId,
+      earlyAnswer,
+    });
 
-  await waitForCompletedSpokenTurn(
-    session,
-    created.responseId,
-    earlyAnswer ? "early answer cue" : "time over cue",
-    30000
-  );
-  const cueText = session.getResponseTranscript(created.responseId);
-  console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
-  console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (cue):", cueText || "(no transcript)");
+    await waitForCompletedSpokenTurn(
+      session,
+      created.responseId,
+      earlyAnswer ? "early answer cue" : "time over cue",
+      30000
+    );
+    const cueText = session.getResponseTranscript(created.responseId);
+    console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+    console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (cue):", cueText || "(no transcript)");
+  } else {
+    console.log("[Realtime][Session2] listening cue skipped — deterministic TTS handled the fixed line");
+    console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+  }
 
   // ── Name capture mini-dialogue ────────────────────────────────────────────
   // Captain names who will answer ("Відповідає Наталія").
   // Moderator echoes the name back in a fixed template ("Слухаємо вас, пані Наталю!").
-  // Recording starts only after this exchange completes (or is skipped on timeout).
-  await session.setDialogueMode({
-    tools: [],
-    instructions: buildModeratorBaseInstructions(systemPrompt),
-    silenceDurationMs: 700,
-    interruptResponse: false,
-    createResponse: false,
-  });
-  session.clearInputBuffer();
-
-  try {
-    await session.waitForUserSpeechStart(6000);
-    await session.waitForUserSpeechStop(10000);
-    await delay(400);
-
-    const transcript = await session.waitForInputTranscript(2000);
-    console.log("[DIALOGUE][Session2] КАПІТАН:", transcript ?? "(не розпізнано)");
-
-    const confirmResponse = await session.createResponse({
-      instructions: buildNameConfirmationPrompt(gameContext, transcript),
-      outputModalities: ["audio"],
-      maxOutputTokens: TOKENS.NAME_CONFIRM,
+  // On clarification retries we skip this whole branch and go straight to answer recording.
+  if (!skipResponderSelection) {
+    // Set dialogue mode (VAD) FIRST, then ensure live mic track, then enable.
+    // Reversing this order means VAD isn't active when the mic is turned on,
+    // and without ensureMicReady the null-track sender never transmits audio.
+    await session.setDialogueMode({
+      tools: [],
+      instructions: buildModeratorBaseInstructions(systemPrompt),
+      silenceDurationMs: 700,
+      interruptResponse: false,
+      createResponse: false,
     });
-    await waitForCompletedSpokenTurn(session, confirmResponse.responseId, "name confirm", 15000);
-    const confirmText = session.getResponseTranscript(confirmResponse.responseId);
-    console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження):", confirmText || "(no transcript)");
-    console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
-  } catch {
-    console.log("[DIALOGUE][Session2] капітан не відповів — вимовляємо fallback");
-    // Players need an audible signal that recording is about to start.
-    // Say "Слухаємо вас!" (same as the no-name path in buildNameConfirmationPrompt)
-    // so they know to begin speaking their answer.
+    session.clearInputBuffer();
     try {
-      await session.setMonologueMode({ tools: [] });
-      const fallback = await session.createResponse({
-        instructions: buildNameConfirmationPrompt(gameContext, null),
+      await session.ensureMicReady?.();
+    } catch (err) {
+      console.warn("[Realtime][Session2] ensureMicReady failed before name capture:", err?.message);
+    }
+    session.setMicEnabled(true);
+    await delay(120);
+
+    try {
+      await session.waitForUserSpeechStart(8000);
+      await session.waitForUserSpeechStop(12000);
+      await delay(600);
+
+      const transcript = await session.waitForInputTranscript(4000);
+      console.log("[DIALOGUE][Session2] КАПІТАН:", transcript ?? "(не розпізнано)");
+
+      const confirmResponse = await session.createResponse({
+        instructions: buildNameConfirmationPrompt(gameContext, transcript),
         outputModalities: ["audio"],
         maxOutputTokens: TOKENS.NAME_CONFIRM,
       });
-      await waitForCompletedSpokenTurn(session, fallback.responseId, "name confirm fallback", 10000);
-      console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження): Слухаємо вас!");
+      await waitForCompletedSpokenTurn(session, confirmResponse.responseId, "name confirm", 15000);
+      const confirmText = session.getResponseTranscript(confirmResponse.responseId);
+      console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження):", confirmText || "(no transcript)");
       console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
-    } catch (fallbackErr) {
-      console.warn("[DIALOGUE][Session2] name confirm fallback failed:", fallbackErr?.message);
+    } catch (err) {
+      console.warn("[DIALOGUE][Session2] captain-name capture missed — falling back to generic handoff:", err?.message);
+      console.log("[DIALOGUE][Session2] капітан не відповів — вимовляємо fallback");
+      // Players need an audible signal that recording is about to start.
+      // Say "Слухаємо вас!" (same as the no-name path in buildNameConfirmationPrompt)
+      // so they know to begin speaking their answer.
+      try {
+        await session.setMonologueMode({ tools: [] });
+        const fallback = await session.createResponse({
+          instructions: buildNameConfirmationPrompt(gameContext, null),
+          outputModalities: ["audio"],
+          maxOutputTokens: TOKENS.NAME_CONFIRM,
+        });
+        await waitForCompletedSpokenTurn(session, fallback.responseId, "name confirm fallback", 10000);
+        console.log("[DIALOGUE][Session2] ВЕДУЧИЙ (підтвердження): Слухаємо вас!");
+        console.log("[DIALOGUE][Session2] ──────────────────────────────────────");
+      } catch (fallbackErr) {
+        console.warn("[DIALOGUE][Session2] name confirm fallback failed:", fallbackErr?.message);
+      }
     }
+  } else {
+    console.log("[Realtime][Session2] clarification retry — responder selection skipped, reopening answer capture only");
   }
 
   // Disable mic before control returns — recording starts its own getUserMedia stream.
+  session.setMicEnabled(false);
   await session.setMonologueMode({ tools: [] });
 }
 

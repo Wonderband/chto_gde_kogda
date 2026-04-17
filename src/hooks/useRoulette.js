@@ -26,7 +26,11 @@ export function useRoulette(gameState, send, graceClosePreSession) {
   const handleRouletteStop = useCallback(
     async (sector) => {
       console.log("[App][Roulette stop]", { sector });
-      await graceClosePreSession();
+      Promise.resolve()
+        .then(() => graceClosePreSession?.())
+        .catch((err) => {
+          console.warn("[App][Roulette stop] graceful spin-session close failed:", err?.message);
+        });
       setSelectedSector(sector);
       send(EVENTS.SPIN_DONE, { sector });
     },

@@ -39,7 +39,7 @@ html, body, #root {
 }
 
 body {
-  background: var(--bg-primary);
+  background: var(--bg-primary) url('/bcground.jpg') center center / cover no-repeat fixed;
   color: var(--text-primary);
   font-family: 'Georgia', 'Times New Roman', serif;
   -webkit-font-smoothing: antialiased;
@@ -51,24 +51,14 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-primary);
+  background: transparent;
   position: relative;
   overflow: hidden;
 }
 
 /* Felt texture overlay for the main playing area */
 .felt-bg {
-  background-color: var(--bg-table);
-  background-image:
-    radial-gradient(ellipse at 20% 30%, rgba(30, 80, 30, 0.4) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 70%, rgba(20, 60, 20, 0.4) 0%, transparent 60%),
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.03) 2px,
-      rgba(0,0,0,0.03) 4px
-    );
+  background: transparent;
 }
 
 /* Gold divider */

@@ -135,6 +135,8 @@ function Game() {
     blitzQueue,
   } = state;
 
+  const [musicPausePlaying, setMusicPausePlaying] = useState(false);
+
   const timerDuration =
     currentQuestion?.round_type === "blitz" ? BLITZ_SEC : DISCUSSION_SEC;
 
@@ -180,6 +182,7 @@ function Game() {
     playersRef,
     closePreSession,
     closePostSession,
+    musicPausePlaying,
   });
 
   // Keep a live ref to currentQuestion so useRecording can pass it to STT
@@ -204,6 +207,7 @@ function Game() {
     selectedSector,
     roundNumber,
     currentQuestion,
+    onMusicPause: () => setMusicPausePlaying(true),
   });
 
   // Compute which sectors have blitz questions.
@@ -250,15 +254,16 @@ function Game() {
                 <span className="rec-dot rec-blink">●</span> Запис...
               </div>
             )}
+            {paused ? (
+              <div className="state-tag pause-tag">⏸ ПАУЗА</div>
+            ) : (
+              stateLabel && (
+                <div className="state-tag slide-down">{stateLabel}</div>
+              )
+            )}
           </div>
 
-          {paused ? (
-            <div className="state-tag pause-tag">⏸ ПАУЗА</div>
-          ) : (
-            stateLabel && (
-              <div className="state-tag slide-down">{stateLabel}</div>
-            )
-          )}
+          <div className="status-center" />
 
           <div className="status-right">
             {roundNumber > 0 && (
@@ -353,6 +358,24 @@ function Game() {
 
       <Controls gameState={gameState} paused={paused} />
       <div className="state-label">{gameState}</div>
+
+      {musicPausePlaying && (
+        <video
+          key="music-pause"
+          src="/videos/music_pause.mp4"
+          autoPlay
+          onEnded={() => setMusicPausePlaying(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            zIndex: 900,
+            background: "#000",
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -363,20 +386,33 @@ export default function App() {
   return (
     <>
       {introPlaying && (
-        <video
-          src="/sounds/intro.mp4"
-          autoPlay
-          onEnded={() => setIntroPlaying(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            zIndex: 999,
-            background: "#000",
-          }}
-        />
+        <>
+          <video
+            src="/sounds/intro.mp4"
+            autoPlay
+            onEnded={() => setIntroPlaying(false)}
+            style={{ display: "none" }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 999,
+              background: "#000",
+            }}
+          >
+            <img
+              src="/intro_img.jpg"
+              alt=""
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
+          </div>
+        </>
       )}
       <GameProvider>
         <Game />
