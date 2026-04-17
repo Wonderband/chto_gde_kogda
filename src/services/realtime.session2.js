@@ -99,8 +99,9 @@ export async function playListeningCue({
   // Moderator echoes the name back in a fixed template ("Слухаємо вас, пані Наталю!").
   // On clarification retries we skip this whole branch and go straight to answer recording.
   if (!skipResponderSelection) {
-    session.clearInputBuffer();
-    session.setMicEnabled(true);
+    // Set dialogue mode (VAD) FIRST, then ensure live mic track, then enable.
+    // Reversing this order means VAD isn't active when the mic is turned on,
+    // and without ensureMicReady the null-track sender never transmits audio.
     await session.setDialogueMode({
       tools: [],
       instructions: buildModeratorBaseInstructions(systemPrompt),
@@ -109,6 +110,13 @@ export async function playListeningCue({
       createResponse: false,
     });
     session.clearInputBuffer();
+    try {
+      await session.ensureMicReady?.();
+    } catch (err) {
+      console.warn("[Realtime][Session2] ensureMicReady failed before name capture:", err?.message);
+    }
+    session.setMicEnabled(true);
+    await delay(120);
 
     try {
       await session.waitForUserSpeechStart(8000);

@@ -200,28 +200,12 @@ export function buildCombinedIntroPrompt(gameContext) {
   // ── Blitz: announce sector + blitz rules once, then introduce character ──
   // The "three questions, 20 seconds each" announcement lives here — NOT in the
   // attention cue — so it is said exactly once, at the very start of the round.
+  // intro_flavor is intentionally NOT included here — it is read verbatim in the
+  // separate warmup opening response, preventing context contamination.
   if (isBlitz) {
     const blitzRules = isRu
       ? `Сектор ${gameContext.sector_number}. Сектор Блиц! Три вопроса. Двадцять секунд на каждый.`
       : `Сектор ${gameContext.sector_number}. Сектор Бліц! Три питання. Двадцять секунд на кожне.`;
-
-    if (flavor) {
-      return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО БЛИЦ-РАУНДУ.
-
-ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
-ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
-
-Виконай суворо у такому порядку:
-1. Скажи РІВНО: «${blitzRules}»
-2. В ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
-3. Зачитай ДОСЛІВНО: «${flavor}»
-
-Після третього пункту одразу замовкни.
-Разом: фіксована фраза + 1 речення від себе + дослівна репліка. Мова: ${
-        isRu ? "російська" : "українська"
-      }.
-`;
-    }
 
     return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО БЛИЦ-РАУНДУ.
 
@@ -268,21 +252,9 @@ export function buildCombinedIntroPrompt(gameContext) {
 `;
   }
 
-  if (flavor) {
-    return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО РАУНДУ.
-
-ПЕРШИМ ЗВУКОМ МАЄ БУТИ «Сектор ${gameContext.sector_number}».
-ЗАБОРОНЕНО: будь-яка вступна фраза перед «Сектор».
-
-Оголоси сектор і в ОДНІЙ короткій фразі представ ${character} — театрально, в дусі Ворошилова.
-Потім зачитай ДОСЛІВНО: «${flavor}»
-Після цього одразу замовкни.
-
-Разом: 1 коротке речення від себе + дослівна репліка. Мова: ${
-      isRu ? "російська" : "українська"
-    }.
-`;
-  }
+  // intro_flavor intentionally NOT included here — it belongs only in the warmup
+  // opening response. Including it here causes context contamination that makes
+  // the model answer the flavor question instead of repeating it verbatim.
 
   return `ПОТОЧНА ФАЗА: ЗАХИЩЕНИЙ МОНОЛОГ — ВСТУП ДО РАУНДУ.
 

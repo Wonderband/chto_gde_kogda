@@ -4,7 +4,6 @@ import {
   RealtimeSession,
   startWheelDialogue,
   runSessionOneFlow,
-  finishVideoQuestionFlow,
 } from "../services/realtime";
 import {
   playListeningCue,
@@ -238,27 +237,17 @@ export function useGamePhaseEffects({
     if (videoFinishInFlightRef.current) return;
 
     videoFinishInFlightRef.current = true;
-    setVideoReady(false); // hide backdrop before speaking — video gone first, then cue
-    await new Promise((r) => setTimeout(r, VIDEO_TO_SPEECH_DELAY_MS)); // brief pause to let backdrop exit
+    setVideoReady(false);
+    await new Promise((r) => setTimeout(r, VIDEO_TO_SPEECH_DELAY_MS));
 
     try {
-      if (!USE_MOCK && preSessionRef.current && systemPromptRef.current) {
-        await finishVideoQuestionFlow({
-          session: preSessionRef.current,
-          systemPrompt: systemPromptRef.current,
-          gameContext: buildCtx(),
-        });
-      } else {
-        await tts(
-          buildVideoTimeCueFallbackText(currentQuestion, GAME_LANGUAGE)
-        );
-      }
+      const timeCueText = buildVideoTimeCueFallbackText(currentQuestion, GAME_LANGUAGE);
+      if (timeCueText) await tts(timeCueText, { voice: REALTIME_VOICE });
     } catch (err) {
       console.error("[Video question finish failed]", err);
     } finally {
       awaitingVideoEndRef.current = false;
       videoFinishInFlightRef.current = false;
-      closePreSession();
       send(EVENTS.READING_DONE);
     }
   }
@@ -403,12 +392,24 @@ export function useGamePhaseEffects({
         const introLine = isVideo
           ? buildVideoFullIntroFallbackText(currentQuestion, sector, GAME_LANGUAGE)
           : buildTextQuestionIntroText(currentQuestion, sector, GAME_LANGUAGE);
-        const shouldWarmup = !!currentQuestion?.intro_flavor && !(currentQuestion?.round_type === "blitz" && (currentQuestion?.blitz_position || 1) > 1);
+        const shouldWarmup = !!currentQuestion?.intro_flavor &&
+          !(currentQuestion?.round_type === "blitz" && (currentQuestion?.blitz_position || 1) > 1);
 
+        // 1. TTS sector+hero intro — always, for all question types
         if (introLine && !cancelled) {
           await tts(introLine, { voice: REALTIME_VOICE });
         }
 
+        // 2. Black box / item_announce structural cues + music via TTS
+        if (isBlackBox && !cancelled) {
+          await tts(blackBoxCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playBlackBoxMusic();
+        } else if (isItemAnnounce && !cancelled) {
+          await playBlackBoxMusic();
+          if (!cancelled && itemCue) await tts(itemCue, { voice: REALTIME_VOICE });
+        }
+
+        // 3. Warmup mini-dialog (Realtime, optional) — same format as spin dialog
         if (!cancelled && !USE_MOCK && shouldWarmup) {
           const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
           if (apiKey && systemPromptRef.current) {
@@ -434,40 +435,18 @@ export function useGamePhaseEffects({
             } catch (err) {
               console.error("[Warmup dialogue failed — continuing to protected read]", err);
             } finally {
-              try {
-                warmupSession?.close();
-              } catch {}
+              try { warmupSession?.close(); } catch {}
             }
           }
         }
 
         if (cancelled) return;
 
+        // 4. Deterministic TTS flow — always runs after warmup (or if warmup skipped/failed)
         if (isVideo) {
-          if (isBlackBox) {
-            await tts(blackBoxCue, { voice: REALTIME_VOICE });
-            if (!cancelled) {
-              await playBlackBoxMusic();
-            }
-            if (!cancelled) {
-              await tts(watchScreenCue, { voice: REALTIME_VOICE });
-            }
-          } else if (isItemAnnounce) {
-            if (!cancelled) {
-              await playBlackBoxMusic();
-            }
-            if (!cancelled && itemCue) {
-              await tts(itemCue, { voice: REALTIME_VOICE });
-            }
-            if (!cancelled) {
-              await tts(watchScreenCue, { voice: REALTIME_VOICE });
-            }
-          } else {
-            await tts(watchScreenCue, { voice: REALTIME_VOICE });
-          }
-
+          await tts(watchScreenCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playGong();
           if (!cancelled) {
-            await playGong();
             awaitingVideoEndRef.current = true;
             setVideoReady(true);
           }
@@ -478,18 +457,10 @@ export function useGamePhaseEffects({
         const questionBody = buildQuestionBodyText(currentQuestion, GAME_LANGUAGE);
         const discussionLine = timeLine(currentQuestion, GAME_LANGUAGE);
 
-        if (attentionLine && !cancelled) {
-          await tts(attentionLine, { voice: REALTIME_VOICE });
-        }
-        if (!cancelled) {
-          await playGong();
-        }
-        if (questionBody && !cancelled) {
-          await tts(questionBody, { voice: REALTIME_VOICE });
-        }
-        if (discussionLine && !cancelled) {
-          await tts(discussionLine, { voice: REALTIME_VOICE });
-        }
+        if (attentionLine && !cancelled) await tts(attentionLine, { voice: REALTIME_VOICE });
+        if (!cancelled) await playGong();
+        if (questionBody && !cancelled) await tts(questionBody, { voice: REALTIME_VOICE });
+        if (discussionLine && !cancelled) await tts(discussionLine, { voice: REALTIME_VOICE });
 
         if (!cancelled) send(EVENTS.READING_DONE);
       } catch (e) {

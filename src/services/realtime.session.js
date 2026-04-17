@@ -129,7 +129,10 @@ export class RealtimeSession {
         this._pc.addTrack(track, this._localStream);
       }
     } else {
-      this._pc.addTransceiver("audio", { direction: "recvonly" });
+      // sendrecv so the server negotiates a bidirectional m-line from the start.
+      // ensureMicReady() will replaceTrack() on the null-track sender later —
+      // replaceTrack requires no renegotiation, unlike addTrack after recvonly.
+      this._pc.addTransceiver("audio", { direction: "sendrecv" });
     }
 
     const dcReady = makeDeferred();
@@ -218,7 +221,7 @@ export class RealtimeSession {
 
     const sender = this._pc
       ?.getSenders?.()
-      ?.find((s) => s.track?.kind === "audio");
+      ?.find((s) => s.track?.kind === "audio" || s.track === null);
 
     if (sender) {
       await sender.replaceTrack(nextTrack);
@@ -311,13 +314,14 @@ export class RealtimeSession {
     createResponse = true,
     silenceDurationMs = null, // if set, uses server_vad instead of semantic_vad
   } = {}) {
-    this.setMicEnabled(true);
+    // Callers control mic explicitly — auto-enable here caused stale audio
+    // to flow into the server VAD buffer during the updateSession roundtrip.
     const turn_detection = silenceDurationMs != null
       ? {
           type: "server_vad",
           silence_duration_ms: silenceDurationMs,
           prefix_padding_ms: 300,
-          threshold: 0.5,
+          threshold: 0.3,
           create_response: createResponse,
           interrupt_response: interruptResponse,
         }
@@ -984,6 +988,19 @@ export class RealtimeSession {
   close() {
     if (this._closed) return;
     this._closed = true;
+
+    // Reject all in-flight waiters immediately so callers don't hang until
+    // their individual timeouts expire after the session is torn down.
+    const closeErr = new Error("RealtimeSession closed");
+    for (const w of this._sessionUpdatedWaiters) try { w.reject(closeErr); } catch {}
+    for (const { deferred } of this._responseCreatedFallbackWaiters) try { deferred.reject(closeErr); } catch {}
+    for (const d of this._responseCreatedByKey.values()) try { d.reject(closeErr); } catch {}
+    for (const { deferred } of this._responseCreatedWaiters) try { deferred.reject(closeErr); } catch {}
+    for (const list of this._responseDoneWaiters.values()) for (const w of list) try { w.reject(closeErr); } catch {}
+    for (const list of this._audioStoppedWaiters.values()) for (const w of list) try { w.reject(closeErr); } catch {}
+    for (const list of this._transcriptMatchWaiters.values()) for (const { deferred } of list) try { deferred.reject(closeErr); } catch {}
+    for (const { deferred } of this._toolWaiters) try { deferred.reject(closeErr); } catch {}
+    for (const w of this._inputTranscriptWaiters) try { w.reject(closeErr); } catch {}
 
     try {
       this._dc?.close();
