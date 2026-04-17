@@ -425,16 +425,8 @@ export function useGamePhaseEffects({
           await tts(introLine, { voice: REALTIME_VOICE });
         }
 
-        // 2. Black box / item_announce structural cues + music via TTS
-        if (isBlackBox && !cancelled) {
-          await tts(blackBoxCue, { voice: REALTIME_VOICE });
-          if (!cancelled) await playBlackBoxMusic();
-        } else if (isItemAnnounce && !cancelled) {
-          await playBlackBoxMusic();
-          if (!cancelled && itemCue) await tts(itemCue, { voice: REALTIME_VOICE });
-        }
-
-        // 3. Warmup mini-dialog (Realtime, optional) — same format as spin dialog
+        // 2. Warmup mini-dialog (Realtime, optional) — runs before structural cues
+        //    so players are warmed up before the box/item is revealed
         if (!cancelled && !USE_MOCK && shouldWarmup) {
           const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
           if (apiKey && systemPromptRef.current) {
@@ -465,6 +457,15 @@ export function useGamePhaseEffects({
               try { warmupSession?.close(); } catch {}
             }
           }
+        }
+
+        // 3. Structural cue → music (both black_box and item_announce: cue first, then music)
+        if (isBlackBox && !cancelled) {
+          await tts(blackBoxCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playBlackBoxMusic();
+        } else if (isItemAnnounce && !cancelled) {
+          if (itemCue) await tts(itemCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playBlackBoxMusic();
         }
 
         if (cancelled) return;
