@@ -8,6 +8,7 @@ import {
   buildCombinedIntroPrompt,
   buildBlackBoxWarmupOpeningPrompt,
   buildWarmupReactionPrompt,
+  buildWarmupReactionWithVideoCuePrompt,
   buildAttentionCuePrompt,
   buildQuestionBodyPrompt,
   buildWatchScreenPrompt,
@@ -32,13 +33,6 @@ function isVideoQuestion(gameContext) {
   return q.presentation_mode === "video" && !!q.video_src;
 }
 
-function shouldSkipWarmupForQuestion(question = {}) {
-  return (
-    question?.force_no_warmup === true ||
-    question?.round_type === "blitz" ||
-    question?.id === "bb_q11"
-  );
-}
 
 async function waitForCompletedSpokenTurn(session, responseId, label) {
   // Register BOTH waiters upfront — output_audio_buffer.stopped can arrive
@@ -57,17 +51,6 @@ async function waitForCompletedSpokenTurn(session, responseId, label) {
     reason,
   });
 
-  if (status !== "completed") {
-    // Response failed — no audio was produced. Silence the dangling audioProm so
-    // it doesn't block or leave an unhandled rejection when it times out.
-    audioProm.catch(() => {});
-    throw new Error(
-      `${label} response did not complete cleanly (status=${status}${
-        reason ? `, reason=${reason}` : ""
-      })`
-    );
-  }
-
   await audioProm;
   console.log(`[Realtime][Session1] ${label} output audio stopped`, {
     responseId,
@@ -80,191 +63,93 @@ async function waitForCompletedSpokenTurn(session, responseId, label) {
     responseId,
   });
 
+  if (status !== "completed") {
+    throw new Error(
+      `${label} response did not complete cleanly (status=${status}${
+        reason ? `, reason=${reason}` : ""
+      })`
+    );
+  }
+
   return doneEvent;
 }
 
 /** Lenient wait for a spoken turn — doesn't throw on non-completed status. */
-const PLAYER_TURN_START_TIMEOUT_MS = 8000;
-const PLAYER_TURN_MAX_SPEECH_MS = 12000;
-const PLAYER_TURN_TRANSCRIPT_TIMEOUT_MS = 2500;
-const PLAYER_TURN_POST_STOP_DELAY_MS = 500;
-const PLAYER_TURN_FORCE_CUTOFF_GRACE_MS = 1200;
-
-async function waitForOptionalSpokenTurn(
-  session,
-  responseId,
-  label,
-  {
-    doneTimeoutMs = 8000,
-    audioTimeoutMs = 10000,
-    graceMs = 300,
-    logPrefix = "[Realtime][Session1]",
-  } = {}
-) {
-  const doneProm = session.waitForResponseDone(responseId, doneTimeoutMs);
-  const audioProm = session.waitForAudioStopped(responseId, audioTimeoutMs);
-
+async function waitForSpokenTurn(session, responseId, label) {
   try {
-    const doneEvent = await doneProm;
-    const status = getResponseStatus(doneEvent);
-    const reason = getStatusReason(doneEvent);
-
-    console.log(`${logPrefix} ${label} response.done`, {
-      responseId,
-      status,
-      reason,
-    });
-
-    if (status !== "completed") {
-      audioProm.catch(() => {});
-      return { ok: false, responseId, status, reason };
-    }
-
+    const doneProm = session.waitForResponseDone(responseId, 20000);
+    const audioProm = session.waitForAudioStopped(responseId, 30000);
+    await doneProm;
     await audioProm;
-    console.log(`${logPrefix} ${label} output audio stopped`, {
-      responseId,
-      status,
-      reason,
-    });
-
-    await delay(graceMs);
-    return { ok: true, responseId, status, reason };
+    await delay(300);
   } catch (err) {
-    console.warn(`${logPrefix} ${label} wait interrupted:`, err?.message);
-    audioProm.catch(() => {});
-    return {
-      ok: false,
-      responseId,
-      status: "timeout",
-      reason: err?.message || "",
-    };
+    console.warn(`[Realtime][Spin] ${label} wait interrupted:`, err?.message);
   }
 }
 
-async function collectSinglePlayerTurn(
-  session,
-  dialogPrefix,
-  {
-    startTimeoutMs = PLAYER_TURN_START_TIMEOUT_MS,
-    maxSpeechMs = PLAYER_TURN_MAX_SPEECH_MS,
-    transcriptTimeoutMs = PLAYER_TURN_TRANSCRIPT_TIMEOUT_MS,
-    postStopDelayMs = PLAYER_TURN_POST_STOP_DELAY_MS,
-    forceCutoffGraceMs = PLAYER_TURN_FORCE_CUTOFF_GRACE_MS,
-  } = {}
-) {
-  await session.waitForUserSpeechStart(startTimeoutMs);
-  console.log(`${dialogPrefix} ГРАВЕЦЬ: (говорить...)`);
+function logMicState(session, label) {
+  try {
+    const tracks = session?._localStream?.getAudioTracks?.() || [];
+    console.log(`[Realtime][Session1] ${label} mic state`, {
+      micEnabled: !!session?.micEnabled,
+      hasUsableMicTrack: !!session?.hasUsableMicTrack?.(),
+      trackCount: tracks.length,
+      tracks: tracks.map((t) => ({ enabled: t.enabled, readyState: t.readyState, muted: t.muted })),
+    });
+  } catch {}
+}
 
-  let forcedCutoff = false;
+async function collectPlayerTurn(session, {
+  label,
+  startTimeoutMs = 12000,
+  stopTimeoutMs = 20000,
+  transcriptTimeoutMs = 2500,
+} = {}) {
+  session.clearInputBuffer();
+  try {
+    await session.ensureMicReady?.();
+  } catch (err) {
+    console.warn(`[Realtime][Session1] ${label} ensureMicReady failed:`, err?.message);
+  }
+  session.setMicEnabled(true);
+  logMicState(session, `${label} capture start`);
+  await delay(120);
+
+  let sawSpeechStart = false;
+  try {
+    await session.waitForUserSpeechStart(startTimeoutMs);
+    sawSpeechStart = true;
+    console.log(`[DIALOGUE][Session1] ГРАВЕЦЬ: (говорить...)`);
+  } catch (err) {
+    const lateTranscript = await session.waitForInputTranscript(3000);
+    if (lateTranscript && String(lateTranscript).trim()) {
+      console.log(`[Realtime][Session1] ${label} late transcript captured without speech_started`, {
+        transcript: lateTranscript,
+      });
+      return String(lateTranscript).trim();
+    }
+    throw err;
+  }
 
   try {
-    await session.waitForUserSpeechStop(maxSpeechMs);
-    await delay(postStopDelayMs);
+    await session.waitForUserSpeechStop(stopTimeoutMs);
   } catch (err) {
-    forcedCutoff = true;
-    console.warn(
-      `${dialogPrefix} player speech exceeded ${maxSpeechMs} ms — forcing cutoff`
-    );
-
-    // Stop feeding more audio into the turn and let server-side VAD settle.
-    session.setMicEnabled(false);
-    await delay(forceCutoffGraceMs);
+    console.warn(`[Realtime][Session1] ${label} speech stop wait interrupted:`, err?.message);
   }
 
-  const transcript = await session.waitForInputTranscript(transcriptTimeoutMs);
-  return { transcript, forcedCutoff };
-}
-
-async function playOptionalReaction(
-  session,
-  {
-    instructions,
-    label,
-    maxOutputTokens,
-    dialogPrefix,
-    realtimeLogPrefix = "[Realtime][Session1]",
-  }
-) {
-  const response = await session.createResponse({
-    instructions,
-    outputModalities: ["audio"],
-    maxOutputTokens,
-  });
-
-  const wait = await waitForOptionalSpokenTurn(
-    session,
-    response.responseId,
-    label,
-    {
-      logPrefix: realtimeLogPrefix,
+  await delay(450);
+  let transcript = await session.waitForInputTranscript(transcriptTimeoutMs);
+  if ((!transcript || !String(transcript).trim()) && sawSpeechStart) {
+    const recovered = await session.waitForInputTranscript(3000);
+    if (recovered && String(recovered).trim()) {
+      console.log(`[Realtime][Session1] ${label} transcript recovered after initial empty result`, {
+        transcript: recovered,
+      });
+      transcript = recovered;
     }
-  );
-
-  const text = session.getResponseTranscript(response.responseId);
-
-  if (wait.ok && text) {
-    console.log(`${dialogPrefix} РЕАКЦІЯ:`, text);
-    return { spoken: true, text, responseId: response.responseId };
   }
 
-  console.warn(
-    `${realtimeLogPrefix} ${label} was not confirmed as fully spoken`,
-    {
-      responseId: response.responseId,
-      status: wait.status,
-      reason: wait.reason,
-      transcript: text || "",
-    }
-  );
-
-  return {
-    spoken: false,
-    text: text || "",
-    responseId: response.responseId,
-    status: wait.status,
-    reason: wait.reason,
-  };
-}
-
-async function playMandatoryProtectedCue(
-  session,
-  {
-    instructions,
-    label,
-    maxOutputTokens,
-    dialogLabel,
-    realtimeLogPrefix = "[Realtime][Session1]",
-  }
-) {
-  session.setMicEnabled(false);
-  session.clearInputBuffer();
-
-  await session.setMonologueMode({
-    tools: [],
-    instructions: buildVerbatimBaseInstructions(),
-  });
-
-  const response = await _withRetry(label, async () => {
-    const r = await session.createResponse({
-      instructions,
-      outputModalities: ["audio"],
-      metadata: { stage: label },
-      maxOutputTokens,
-      conversation: "none",
-    });
-
-    console.log(`${realtimeLogPrefix} ${label} created`, {
-      responseId: r.responseId,
-    });
-
-    await waitForCompletedSpokenTurn(session, r.responseId, label);
-    return r;
-  });
-
-  const text = session.getResponseTranscript(response.responseId);
-  console.log(dialogLabel, text || "(no transcript)");
-
-  return { responseId: response.responseId, text: text || "" };
+  return transcript && String(transcript).trim() ? String(transcript).trim() : null;
 }
 
 /**
@@ -274,12 +159,9 @@ async function playMandatoryProtectedCue(
  *   3. One short reaction phrase
  *   Then silence — no further dialogue.
  */
-export async function startWheelDialogue(
-  session,
-  systemPrompt,
-  gameContext,
-  { delayMs = 5500, abortSignal = null } = {}
-) {
+export async function startWheelDialogue(session, systemPrompt, gameContext, {
+  delayMs = 5500,
+} = {}) {
   console.log("[Realtime][Spin] strict dialogue start", {
     round: gameContext?.round_number,
     delayMs,
@@ -296,12 +178,11 @@ export async function startWheelDialogue(
   });
 
   session.clearInputBuffer();
-  session.setMicEnabled(false); // mute during delay — no VAD false triggers
+  session.setMicEnabled(false); // keep mic closed until the moderator finishes
 
   // ── Step 0: wait for music to settle and players to be ready ──
   await delay(delayMs);
 
-  session.setMicEnabled(true);
   await session.primeAudioOutput(3000);
   console.log("[Realtime][Spin] audio primed, opening phrase starting");
 
@@ -311,91 +192,49 @@ export async function startWheelDialogue(
     outputModalities: ["audio"],
     maxOutputTokens: TOKENS.WHEEL_OPENING,
   });
-  await waitForCompletedSpokenTurn(
-    session,
-    openingResponse.responseId,
-    "opening"
-  );
+  await waitForSpokenTurn(session, openingResponse.responseId, "opening");
   const openingText = session.getResponseTranscript(openingResponse.responseId);
   console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
   console.log("[DIALOGUE][Spin] ВЕДУЧИЙ:", openingText || "(no transcript)");
 
-  // Discard any audio buffered while the moderator was speaking
+  // Discard any audio buffered while the moderator was speaking, then hand off to the player.
   session.clearInputBuffer();
+  try {
+    await session.ensureMicReady?.();
+  } catch (err) {
+    console.warn("[Realtime][Spin] ensureMicReady failed after opening:", err?.message);
+  }
+  session.setMicEnabled(true);
+  logMicState(session, "spin after opening");
+  await delay(120);
 
   // ── Step 2: wait for player response ──
-  // Skip entirely if the wheel has already stopped (abort signal set by READING effect).
-  if (abortSignal?.aborted) {
-    console.log("[Realtime][Spin] aborted before player wait — wheel stopped");
-    try {
-      await session.setMonologueMode({ tools: [] });
-      session.setMicEnabled(false);
-    } catch {}
-    return null;
-  }
-
   try {
-    // Race player speech against abort — if wheel stops mid-wait, skip reaction.
-    const abortPoll = abortSignal
-      ? new Promise((resolve) => {
-          const iv = setInterval(() => {
-            if (abortSignal.aborted) {
-              clearInterval(iv);
-              resolve("aborted");
-            }
-          }, 100);
-        })
-      : null;
-
-    const speechRace = session.waitForUserSpeechStart(
-      PLAYER_TURN_START_TIMEOUT_MS
-    );
-    const winner = abortPoll
-      ? await Promise.race([speechRace.then(() => "speech"), abortPoll])
-      : "speech";
-
-    if (winner === "aborted") {
-      console.log(
-        "[Realtime][Spin] aborted while waiting for player speech — skipping reaction"
-      );
-      try {
-        await session.setMonologueMode({ tools: [] });
-        session.setMicEnabled(false);
-        session.clearInputBuffer();
-      } catch {}
-      return null;
-    }
-
-    const { transcript, forcedCutoff } = await collectSinglePlayerTurn(
-      session,
-      "[DIALOGUE][Spin]"
-    );
-
-    // End player-turn capture before any moderator reaction.
-    session.setMicEnabled(false);
-    session.clearInputBuffer();
+    const transcript = await collectPlayerTurn(session, {
+      label: "spin",
+      startTimeoutMs: 12000,
+      stopTimeoutMs: 20000,
+      transcriptTimeoutMs: 3000,
+    });
 
     if (!transcript) {
-      console.log(
-        forcedCutoff
-          ? "[DIALOGUE][Spin] ГРАВЕЦЬ: (репліку примусово обірвано, транскрипт порожній — реакція пропущена)"
-          : "[DIALOGUE][Spin] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)"
-      );
+      console.log("[DIALOGUE][Spin] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)");
       console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
     } else {
       console.log("[DIALOGUE][Spin] ГРАВЕЦЬ:", transcript);
-
-      await playOptionalReaction(session, {
+      // ── Step 3: one reaction phrase ──
+      const reactionResponse = await session.createResponse({
         instructions: buildWheelReactionPrompt(gameContext, transcript),
-        label: "spin reaction",
-        maxOutputTokens: TOKENS.WHEEL_REACTION,
-        dialogPrefix: "[DIALOGUE][Spin]",
-        realtimeLogPrefix: "[Realtime][Spin]",
+        outputModalities: ["audio"],
+        maxOutputTokens: TOKENS.WHEEL_OPENING,
       });
-
+      await waitForSpokenTurn(session, reactionResponse.responseId, "reaction");
+      const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+      console.log("[DIALOGUE][Spin] РЕАКЦІЯ: ", reactionText || "(no transcript)");
       console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
     }
   } catch {
+    // Player didn't respond or timed out — skip reaction gracefully
     console.log("[DIALOGUE][Spin] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
     console.log("[DIALOGUE][Spin] ─────────────────────────────────────────");
   }
@@ -418,132 +257,17 @@ export async function continueWheelDialogue() {
   return null;
 }
 
-/**
- * Retry wrapper for response.create + waitForCompletedSpokenTurn.
- * On server error (status=failed), creates a fresh response and tries again.
- * fn must be async and return the response object; it should call
- * waitForCompletedSpokenTurn internally and throw on non-completed status.
- */
-async function _withRetry(label, fn, attempts = 2) {
-  let lastErr;
-  for (let i = 1; i <= attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (i < attempts) {
-        console.warn(
-          `[Realtime][Session1] ${label} attempt ${i} failed, retrying:`,
-          err?.message
-        );
-        await delay(800);
-      }
-    }
-  }
-  throw lastErr;
-}
-
-async function switchToCleanProtectedSession(currentSession, openReadSession, logReason = "protected phase") {
-  if (!openReadSession) return currentSession;
-
-  const cleanSession = await openReadSession();
-  if (!cleanSession) return currentSession;
-
-  try {
-    cleanSession.setMicEnabled(false);
-    try {
-      await cleanSession.updateSession({ turn_detection: null });
-    } catch {}
-    cleanSession.clearInputBuffer();
-  } catch {}
-
-  try {
-    currentSession?.close?.();
-  } catch {}
-
-  console.log(`[Realtime][Session1] switched to clean read session for ${logReason}`);
-  return cleanSession;
-}
-
-function buildProtectedReadContext(gameContext = {}) {
-  const q = gameContext?.current_question || {};
-  return {
-    game_language: gameContext?.game_language,
-    current_question: {
-      question_text: q.question_text || "",
-      round_type: q.round_type,
-      blitz_position: q.blitz_position,
-      presentation_mode: q.presentation_mode,
-    },
-  };
-}
-
-/**
- * Attention cue → gong → question body on an already-configured session.
- * Extracted so both the normal path and the split-session warmup path share it.
- */
-async function _runQuestionReadPhase(
-  session,
-  gameContext,
-  baseInstructions = buildVerbatimBaseInstructions()
-) {
-  // Protected read must be a pure "read exactly this text" phase.
-  // Do NOT inherit the moderator persona or warmup context here.
-  await session.setMonologueMode({
-    tools: [],
-    instructions: baseInstructions,
-  });
-
-  const attentionResponse = await _withRetry("attention cue", async () => {
-    const r = await session.createResponse({
-      instructions: buildAttentionCuePrompt(gameContext),
-      outputModalities: ["audio"],
-      metadata: { stage: "attention_cue" },
-      maxOutputTokens: TOKENS.ATTENTION_CUE,
-      conversation: "none",
-    });
-    console.log("[Realtime][Session1] attention cue created", {
-      responseId: r.responseId,
-    });
-    await waitForCompletedSpokenTurn(session, r.responseId, "attention cue");
-    return r;
-  });
-
-  await playGong();
-
-  const questionResponse = await _withRetry("question read", async () => {
-    const r = await session.createResponse({
-      instructions: buildQuestionBodyPrompt(gameContext),
-      outputModalities: ["audio"],
-      metadata: { stage: "question_read" },
-      maxOutputTokens: "inf",
-      conversation: "none",
-    });
-    console.log("[Realtime][Session1] question body created", {
-      responseId: r.responseId,
-    });
-    await waitForCompletedSpokenTurn(session, r.responseId, "question read");
-    return r;
-  });
-}
-
 export async function runSessionOneFlow({
   session,
   systemPrompt,
   gameContext,
   warmupTimeoutMs = 6000, // kept for API compatibility
-  openReadSession = null, // async () => RealtimeSession — opens a fresh session for the question read
 }) {
   const isVideo = isVideoQuestion(gameContext);
   const isBlackBox = gameContext?.current_question?.round_type === "black_box";
   const isItemAnnounce = !!gameContext?.current_question?.item_to_announce;
-  const skipWarmup = shouldSkipWarmupForQuestion(gameContext?.current_question);
-  // Skip warmup for black_box/item_announce and high-risk reads — music/cue/question take over immediately.
-  const hasFlavor =
-    !!gameContext?.current_question?.intro_flavor &&
-    !isBlackBox &&
-    !isItemAnnounce &&
-    !skipWarmup;
+  // Skip warmup for black_box/item_announce — music plays immediately after combined intro
+  const hasFlavor = !!gameContext?.current_question?.intro_flavor && !isBlackBox && !isItemAnnounce;
   const blitzPos = gameContext?.current_question?.blitz_position || 1;
   const isBlitzContinuation =
     gameContext?.current_question?.round_type === "blitz" && blitzPos > 1;
@@ -555,7 +279,6 @@ export async function runSessionOneFlow({
     isVideo,
     isBlackBox,
     hasFlavor,
-    skipWarmup,
     isBlitzContinuation,
   });
 
@@ -575,44 +298,24 @@ export async function runSessionOneFlow({
   // One response covers: sector number + character + intro_flavor (if present).
   // For black_box: also ends with "Увага, чорний ящик!" — then music, then video.
   if (!isBlitzContinuation) {
-    const introGameContext = skipWarmup
-      ? {
-          ...gameContext,
-          current_question: {
-            ...(gameContext?.current_question || {}),
-            intro_flavor: "",
-          },
-        }
-      : gameContext;
-
-    const introResponse = await _withRetry("combined intro", async () => {
-      const r = await session.createResponse({
-        instructions: buildCombinedIntroPrompt(introGameContext),
-        outputModalities: ["audio"],
-        metadata: { stage: "combined_intro" },
-        maxOutputTokens: TOKENS.COMBINED_INTRO,
-      });
-      console.log("[Realtime][Session1] combined intro created", {
-        responseId: r.responseId,
-      });
-      await waitForCompletedSpokenTurn(session, r.responseId, "combined intro");
-      return r;
+    const introResponse = await session.createResponse({
+      instructions: buildCombinedIntroPrompt(gameContext),
+      outputModalities: ["audio"],
+      metadata: { stage: "combined_intro" },
+      maxOutputTokens: TOKENS.COMBINED_INTRO,
     });
+    console.log("[Realtime][Session1] combined intro created", { responseId: introResponse.responseId });
+    await waitForCompletedSpokenTurn(session, introResponse.responseId, "combined intro");
     const introText = session.getResponseTranscript(introResponse.responseId);
     console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
-    console.log(
-      "[DIALOGUE][Session1] ВЕДУЧИЙ (вступ):",
-      introText || "(no transcript)"
-    );
+    console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (вступ):", introText || "(no transcript)");
 
     // ── Black box flow: music → warmup dialogue → "Увага на екран!" → gong → video
     if (isBlackBox) {
       // Step 1: music plays while box is brought to the studio
       console.log("[Realtime][Session1] black box: playing music");
       await playBlackBoxMusic();
-      console.log(
-        "[Realtime][Session1] black box: music done, starting warmup"
-      );
+      console.log("[Realtime][Session1] black box: music done, starting warmup");
 
       const blackBoxFlavor = gameContext?.current_question?.intro_flavor;
 
@@ -633,101 +336,82 @@ export async function runSessionOneFlow({
           metadata: { stage: "black_box_warmup_opening" },
           maxOutputTokens: TOKENS.COMBINED_INTRO,
         });
-        console.log("[Realtime][Session1] black box warmup opening created", {
-          responseId: openingResponse.responseId,
-        });
-        await waitForCompletedSpokenTurn(
-          session,
-          openingResponse.responseId,
-          "black box warmup opening"
-        );
-        const openingText = session.getResponseTranscript(
-          openingResponse.responseId
-        );
-        console.log(
-          "[DIALOGUE][Session1] ВЕДУЧИЙ (чорний ящик вступ):",
-          openingText || "(no transcript)"
-        );
+        console.log("[Realtime][Session1] black box warmup opening created", { responseId: openingResponse.responseId });
+        await waitForSpokenTurn(session, openingResponse.responseId, "black box warmup opening");
+        const openingText = session.getResponseTranscript(openingResponse.responseId);
+        console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (чорний ящик вступ):", openingText || "(no transcript)");
 
-        // Step 3: collect one bounded player turn, optionally react,
-        // then ALWAYS play the protected bridge separately.
+        // Step 3: wait for player response, then react with "Увага на екран!" ending
+        let playerResponded = false;
         try {
-          const { transcript, forcedCutoff } = await collectSinglePlayerTurn(
-            session,
-            "[DIALOGUE][Session1]"
-          );
-
-          // End player-turn capture before any moderator reaction.
-          session.setMicEnabled(false);
           session.clearInputBuffer();
+          try {
+            await session.ensureMicReady?.();
+          } catch (err) {
+            console.warn("[Realtime][Session1] ensureMicReady failed before black box capture:", err?.message);
+          }
+          session.setMicEnabled(true);
+          logMicState(session, "black box after opening");
+          await delay(120);
+          const transcript = await collectPlayerTurn(session, {
+            label: "black box warmup",
+            startTimeoutMs: 12000,
+            stopTimeoutMs: 20000,
+            transcriptTimeoutMs: 3000,
+          });
+          playerResponded = !!transcript;
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript || "(транскрипт не отримано)");
 
           if (!transcript) {
-            console.log(
-              forcedCutoff
-                ? "[DIALOGUE][Session1] ГРАВЕЦЬ: (репліку примусово обірвано, транскрипт порожній — реакція пропущена)"
-                : "[DIALOGUE][Session1] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)"
-            );
-            console.log(
-              "[DIALOGUE][Session1] ──────────────────────────────────────"
-            );
+            // Empty transcript = STT got nothing intelligible — skip personalised reaction,
+            // fall through to the "Увага на екран!" cue below (playerResponded stays true
+            // so we DON'T fire the duplicate cue path, but we do need to emit the cue now).
+            playerResponded = false;
           } else {
-            console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript);
-
-            await playOptionalReaction(session, {
-              instructions: buildWarmupReactionPrompt(gameContext, transcript),
-              label: "black box warmup reaction",
-              maxOutputTokens: TOKENS.WARMUP_REACTION,
-              dialogPrefix: "[DIALOGUE][Session1]",
-              realtimeLogPrefix: "[Realtime][Session1]",
-            });
-
-            console.log(
-              "[DIALOGUE][Session1] ──────────────────────────────────────"
-            );
-          }
+          const reactionResponse = await session.createResponse({
+            instructions: buildWarmupReactionWithVideoCuePrompt(gameContext, transcript),
+            outputModalities: ["audio"],
+            maxOutputTokens: TOKENS.WARMUP_REACTION,
+          });
+          await waitForSpokenTurn(session, reactionResponse.responseId, "black box warmup reaction");
+          session.setMicEnabled(false);
+          session.clearInputBuffer();
+          const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+          console.log("[DIALOGUE][Session1] РЕАКЦІЯ:", reactionText || "(no transcript)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+          } // end else (transcript non-empty)
         } catch {
-          console.log(
-            "[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)"
-          );
-          console.log(
-            "[DIALOGUE][Session1] ──────────────────────────────────────"
-          );
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
         }
 
-        try {
-          await session.setMonologueMode({ tools: [] });
-        } catch {}
+        await session.setMonologueMode({ tools: [] });
 
-        const protectedSession = await switchToCleanProtectedSession(
-          session,
-          openReadSession,
-          "black box video cue"
-        );
-        await playMandatoryProtectedCue(protectedSession, {
-          instructions: buildWatchScreenPrompt(gameContext),
-          label: "black_box_video_cue",
-          maxOutputTokens: TOKENS.VIDEO_CUE,
-          dialogLabel: "[DIALOGUE][Session1] ВЕДУЧИЙ (на екран):",
-          realtimeLogPrefix: "[Realtime][Session1]",
-        });
-        await playGong();
-        return { awaitVideoEnd: true, activeSession: protectedSession };
+        // If player didn't respond, still need explicit "Увага на екран!" cue
+        if (!playerResponded) {
+          const cueResponse = await session.createResponse({
+            instructions: buildWatchScreenPrompt(gameContext),
+            outputModalities: ["audio"],
+            metadata: { stage: "black_box_video_cue" },
+            maxOutputTokens: TOKENS.VIDEO_CUE,
+          });
+          await waitForSpokenTurn(session, cueResponse.responseId, "black box video cue fallback");
+        }
       } else {
-        const protectedSession = await switchToCleanProtectedSession(
-          session,
-          openReadSession,
-          "black box video cue"
-        );
-        await playMandatoryProtectedCue(protectedSession, {
+        // No flavor: just "Увага на екран!" after music
+        const cueResponse = await session.createResponse({
           instructions: buildWatchScreenPrompt(gameContext),
-          label: "black_box_video_cue",
+          outputModalities: ["audio"],
+          metadata: { stage: "black_box_video_cue" },
           maxOutputTokens: TOKENS.VIDEO_CUE,
-          dialogLabel: "[DIALOGUE][Session1] ВЕДУЧИЙ (на екран):",
-          realtimeLogPrefix: "[Realtime][Session1]",
         });
-        await playGong();
-        return { awaitVideoEnd: true, activeSession: protectedSession };
+        console.log("[Realtime][Session1] black box video cue created", { responseId: cueResponse.responseId });
+        await waitForSpokenTurn(session, cueResponse.responseId, "black box video cue");
       }
+
+      // Gong after "Увага на екран!" — before video appears
+      await playGong();
+      return { awaitVideoEnd: true };
     }
 
     // ── Item announce flow: music → warmup dialogue → "Увага на екран!" → gong → video ──
@@ -736,9 +420,7 @@ export async function runSessionOneFlow({
     if (isItemAnnounce) {
       console.log("[Realtime][Session1] item announce: playing music");
       await playBlackBoxMusic();
-      console.log(
-        "[Realtime][Session1] item announce: music done, starting warmup"
-      );
+      console.log("[Realtime][Session1] item announce: music done, starting warmup");
 
       const itemFlavor = gameContext?.current_question?.intro_flavor;
 
@@ -758,100 +440,76 @@ export async function runSessionOneFlow({
           metadata: { stage: "item_announce_warmup_opening" },
           maxOutputTokens: TOKENS.COMBINED_INTRO,
         });
-        console.log(
-          "[Realtime][Session1] item announce warmup opening created",
-          { responseId: openingResponse.responseId }
-        );
-        await waitForCompletedSpokenTurn(
-          session,
-          openingResponse.responseId,
-          "item announce warmup opening"
-        );
-        const openingText = session.getResponseTranscript(
-          openingResponse.responseId
-        );
-        console.log(
-          "[DIALOGUE][Session1] ВЕДУЧИЙ (item announce вступ):",
-          openingText || "(no transcript)"
-        );
+        console.log("[Realtime][Session1] item announce warmup opening created", { responseId: openingResponse.responseId });
+        await waitForSpokenTurn(session, openingResponse.responseId, "item announce warmup opening");
+        const openingText = session.getResponseTranscript(openingResponse.responseId);
+        console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (item announce вступ):", openingText || "(no transcript)");
 
+        let playerResponded = false;
         try {
-          const { transcript, forcedCutoff } = await collectSinglePlayerTurn(
-            session,
-            "[DIALOGUE][Session1]"
-          );
-
-          // End player-turn capture before any moderator reaction.
-          session.setMicEnabled(false);
           session.clearInputBuffer();
+          try {
+            await session.ensureMicReady?.();
+          } catch (err) {
+            console.warn("[Realtime][Session1] ensureMicReady failed before item announce capture:", err?.message);
+          }
+          session.setMicEnabled(true);
+          logMicState(session, "item announce after opening");
+          await delay(120);
+          const transcript = await collectPlayerTurn(session, {
+            label: "item announce warmup",
+            startTimeoutMs: 12000,
+            stopTimeoutMs: 20000,
+            transcriptTimeoutMs: 3000,
+          });
+          playerResponded = !!transcript;
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript || "(транскрипт не отримано)");
 
           if (!transcript) {
-            console.log(
-              forcedCutoff
-                ? "[DIALOGUE][Session1] ГРАВЕЦЬ: (репліку примусово обірвано, транскрипт порожній — реакція пропущена)"
-                : "[DIALOGUE][Session1] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)"
-            );
-            console.log(
-              "[DIALOGUE][Session1] ──────────────────────────────────────"
-            );
+            playerResponded = false;
           } else {
-            console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript);
-
-            await playOptionalReaction(session, {
-              instructions: buildWarmupReactionPrompt(gameContext, transcript),
-              label: "item announce warmup reaction",
+            const reactionResponse = await session.createResponse({
+              instructions: buildWarmupReactionWithVideoCuePrompt(gameContext, transcript),
+              outputModalities: ["audio"],
               maxOutputTokens: TOKENS.WARMUP_REACTION,
-              dialogPrefix: "[DIALOGUE][Session1]",
-              realtimeLogPrefix: "[Realtime][Session1]",
             });
-
-            console.log(
-              "[DIALOGUE][Session1] ──────────────────────────────────────"
-            );
+            await waitForSpokenTurn(session, reactionResponse.responseId, "item announce warmup reaction");
+            session.setMicEnabled(false);
+            session.clearInputBuffer();
+            const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+            console.log("[DIALOGUE][Session1] РЕАКЦІЯ:", reactionText || "(no transcript)");
+            console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
           }
         } catch {
-          console.log(
-            "[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)"
-          );
-          console.log(
-            "[DIALOGUE][Session1] ──────────────────────────────────────"
-          );
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
         }
 
-        try {
-          await session.setMonologueMode({ tools: [] });
-        } catch {}
+        await session.setMonologueMode({ tools: [] });
 
-        const protectedSession = await switchToCleanProtectedSession(
-          session,
-          openReadSession,
-          "item announce video cue"
-        );
-        await playMandatoryProtectedCue(protectedSession, {
-          instructions: buildWatchScreenPrompt(gameContext),
-          label: "item_announce_video_cue",
-          maxOutputTokens: TOKENS.VIDEO_CUE,
-          dialogLabel: "[DIALOGUE][Session1] ВЕДУЧИЙ (на екран):",
-          realtimeLogPrefix: "[Realtime][Session1]",
-        });
-        await playGong();
-        return { awaitVideoEnd: true, activeSession: protectedSession };
+        if (!playerResponded) {
+          const cueResponse = await session.createResponse({
+            instructions: buildWatchScreenPrompt(gameContext),
+            outputModalities: ["audio"],
+            metadata: { stage: "item_announce_video_cue" },
+            maxOutputTokens: TOKENS.VIDEO_CUE,
+          });
+          await waitForSpokenTurn(session, cueResponse.responseId, "item announce video cue fallback");
+        }
       } else {
-        const protectedSession = await switchToCleanProtectedSession(
-          session,
-          openReadSession,
-          "item announce video cue"
-        );
-        await playMandatoryProtectedCue(protectedSession, {
+        // No flavor: just "Увага на екран!" after music
+        const cueResponse = await session.createResponse({
           instructions: buildWatchScreenPrompt(gameContext),
-          label: "item_announce_video_cue",
+          outputModalities: ["audio"],
+          metadata: { stage: "item_announce_video_cue" },
           maxOutputTokens: TOKENS.VIDEO_CUE,
-          dialogLabel: "[DIALOGUE][Session1] ВЕДУЧИЙ (на екран):",
-          realtimeLogPrefix: "[Realtime][Session1]",
         });
-        await playGong();
-        return { awaitVideoEnd: true, activeSession: protectedSession };
+        console.log("[Realtime][Session1] item announce video cue created", { responseId: cueResponse.responseId });
+        await waitForSpokenTurn(session, cueResponse.responseId, "item announce video cue");
       }
+
+      await playGong();
+      return { awaitVideoEnd: true };
     }
 
     // ── Warmup dialogue — only when intro_flavor exists (non-black_box, non-item_announce) ───
@@ -872,190 +530,141 @@ export async function runSessionOneFlow({
         createResponse: false,
       });
       session.clearInputBuffer();
-      await delay(300); // let server process mode-switch before mic goes live
-      session.setMicEnabled(true);
 
-      // Pre-open a clean read session in parallel — hides connection latency behind
-      // player speaking time (up to 8 s). The warmup conversation leaves topic-specific
-      // history that causes verbatim prompts to fail on the same session; a fresh
-      // session with no history always obeys verbatim instructions reliably.
-      // Text questions only — video/black_box/item_announce handle their own transitions.
-      let readSessionPromise = null;
-      if (!isVideo && openReadSession) {
-        readSessionPromise = (async () => {
-          const s = await openReadSession();
-          if (!s) return null;
-          // Disable VAD immediately — this session is for reading only.
-          // open() starts with semantic_vad active; while the player speaks
-          // during warmup, that audio gets committed as a user conversation item
-          // in the read session. The model then sees [user: warmup speech]
-          // [assistant: attention cue] and responds in assistant mode instead of
-          // reading the question verbatim. Disabling VAD prevents any audio from
-          // being committed to this session's conversation history.
-          s.setMicEnabled(false);
-          try {
-            await s.updateSession({ turn_detection: null });
-          } catch {}
-          s.clearInputBuffer();
-          return s;
-        })().catch((err) => {
-          console.warn(
-            "[Realtime][Session1] read session pre-open failed:",
-            err?.message
-          );
-          return null;
-        });
+      const warmupOpeningResponse = await session.createResponse({
+        instructions: buildBlackBoxWarmupOpeningPrompt(gameContext),
+        outputModalities: ["audio"],
+        metadata: { stage: "warmup_opening" },
+        maxOutputTokens: TOKENS.COMBINED_INTRO,
+      });
+      await waitForSpokenTurn(session, warmupOpeningResponse.responseId, "warmup opening");
+      const warmupOpeningText = session.getResponseTranscript(warmupOpeningResponse.responseId);
+      console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+      console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (розминка):", warmupOpeningText || "(no transcript)");
+
+      session.clearInputBuffer();
+      try {
+        await session.ensureMicReady?.();
+      } catch (err) {
+        console.warn("[Realtime][Session1] ensureMicReady failed before warmup capture:", err?.message);
       }
+      session.setMicEnabled(true);
+      logMicState(session, "warmup after opening");
+      await delay(120);
 
       let playerResponded = false;
-
       try {
-        const { transcript, forcedCutoff } = await collectSinglePlayerTurn(
-          session,
-          "[DIALOGUE][Session1]"
-        );
-
+        const transcript = await collectPlayerTurn(session, {
+          label: "warmup",
+          startTimeoutMs: Math.max(12000, warmupTimeoutMs || 0),
+          stopTimeoutMs: 20000,
+          transcriptTimeoutMs: 3000,
+        });
         playerResponded = !!transcript;
 
-        // End player-turn capture before any moderator reaction.
-        session.setMicEnabled(false);
-        session.clearInputBuffer();
-
         if (!transcript) {
-          console.log(
-            forcedCutoff
-              ? "[DIALOGUE][Session1] ГРАВЕЦЬ: (репліку примусово обірвано, транскрипт порожній — реакція пропущена)"
-              : "[DIALOGUE][Session1] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)"
-          );
-          console.log(
-            "[DIALOGUE][Session1] ──────────────────────────────────────"
-          );
+          // Empty/null transcript — STT got nothing useful.
+          // Skip reaction to avoid the model producing random unrelated phrases.
+          console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (транскрипт порожній — реакція пропущена)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
         } else {
           console.log("[DIALOGUE][Session1] ГРАВЕЦЬ:", transcript);
-
-          await playOptionalReaction(session, {
-            instructions: buildWarmupReactionPrompt(gameContext, transcript),
-            label: "warmup reaction",
+          // Reaction: for video questions, fold "Увага на екран!" into the reaction
+          // so no separate video intro response is needed (avoids warmup context bleed).
+          const reactionInstructions = isVideo
+            ? buildWarmupReactionWithVideoCuePrompt(gameContext, transcript)
+            : buildWarmupReactionPrompt(gameContext, transcript);
+          const reactionResponse = await session.createResponse({
+            instructions: reactionInstructions,
+            outputModalities: ["audio"],
             maxOutputTokens: TOKENS.WARMUP_REACTION,
-            dialogPrefix: "[DIALOGUE][Session1]",
-            realtimeLogPrefix: "[Realtime][Session1]",
           });
-
-          console.log(
-            "[DIALOGUE][Session1] ──────────────────────────────────────"
-          );
+          await waitForSpokenTurn(session, reactionResponse.responseId, "warmup reaction");
+          // Mute mic immediately after reaction — VAD is still live at this point and any
+          // additional player speech (e.g. "Дуже добре.") would enter the session context
+          // and contaminate the attention cue / question read that follows.
+          session.setMicEnabled(false);
+          session.clearInputBuffer();
+          const reactionText = session.getResponseTranscript(reactionResponse.responseId);
+          console.log("[DIALOGUE][Session1] РЕАКЦІЯ: ", reactionText || "(no transcript)");
+          console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
         }
       } catch {
-        console.log(
-          "[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)"
-        );
-        console.log(
-          "[DIALOGUE][Session1] ──────────────────────────────────────"
-        );
+        console.log("[DIALOGUE][Session1] ГРАВЕЦЬ: (не відповів — реакція пропущена)");
+        console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
       }
 
-      try {
-        await session.setMonologueMode({ tools: [] });
-      } catch {}
+      await session.setMonologueMode({ tools: [] });
       console.log("[Realtime][Session1] warmup dialogue complete");
 
       if (isVideo) {
-        const protectedSession = await switchToCleanProtectedSession(
-          session,
-          openReadSession,
-          "video cue after warmup"
-        );
-        await playMandatoryProtectedCue(protectedSession, {
-          instructions: buildWatchScreenPrompt(gameContext),
-          label: "video cue",
-          maxOutputTokens: TOKENS.VIDEO_CUE,
-          dialogLabel: "[DIALOGUE][Session1] ВЕДУЧИЙ (на екран):",
-          realtimeLogPrefix: "[Realtime][Session1]",
-        });
-
+        // Reaction already ended with "Увага на екран!" — gong then video.
+        // If player didn't respond, we still need the cue.
+        if (!playerResponded) {
+          const cueResponse = await session.createResponse({
+            instructions: buildWatchScreenPrompt(gameContext),
+            outputModalities: ["audio"],
+            maxOutputTokens: TOKENS.VIDEO_CUE,
+          });
+          await waitForSpokenTurn(session, cueResponse.responseId, "video cue");
+        }
         await playGong();
-        return { awaitVideoEnd: true, activeSession: protectedSession };
+        return { awaitVideoEnd: true };
       }
-
-      let protectedSession = null;
-      if (readSessionPromise) {
-        const readSession = await readSessionPromise;
-        if (readSession) {
-          try { session.close(); } catch {}
-          console.log("[Realtime][Session1] switched to clean read session after warmup");
-          protectedSession = readSession;
-        }
-      }
-      if (!protectedSession) {
-        protectedSession = await switchToCleanProtectedSession(
-          session,
-          openReadSession,
-          "question read after warmup"
-        );
-      }
-
-      try {
-        await _runQuestionReadPhase(
-          protectedSession,
-          buildProtectedReadContext(gameContext),
-          buildVerbatimBaseInstructions()
-        );
-      } finally {
-        if (protectedSession !== session) {
-          try { protectedSession.close(); } catch {}
-        }
-      }
-      return { awaitVideoEnd: false };
-    }
-
-    if (skipWarmup) {
-      console.log("[Realtime][Session1] warmup skipped for high-risk question", {
-        questionId: gameContext?.current_question?.id,
-        roundType: gameContext?.current_question?.round_type,
-      });
+      // Text question: fall through to question read below.
     }
   } else {
-    console.log("[Realtime][Session1] blitz continuation — intro skipped", {
-      blitzPos,
-    });
+    console.log("[Realtime][Session1] blitz continuation — intro skipped", { blitzPos });
   }
 
   // ── Video question without warmup (no flavor, or blitz continuation) ──────
   // Clean context here — no warmup conversation history, so VIDEO_CUE budget
   // is sufficient and no risk of preamble.
   if (isVideo) {
-    const protectedSession = await switchToCleanProtectedSession(
-      session,
-      openReadSession,
-      "video cue"
-    );
-    await playMandatoryProtectedCue(protectedSession, {
+    const screenResponse = await session.createResponse({
       instructions: buildWatchScreenPrompt(gameContext),
-      label: "video_cue",
+      outputModalities: ["audio"],
+      metadata: { stage: "video_cue" },
       maxOutputTokens: TOKENS.VIDEO_CUE,
-      dialogLabel: "[DIALOGUE][Session1] ВЕДУЧИЙ (на екран):",
-      realtimeLogPrefix: "[Realtime][Session1]",
     });
+    console.log("[Realtime][Session1] video cue created", { responseId: screenResponse.responseId });
+    await waitForSpokenTurn(session, screenResponse.responseId, "video cue");
     await playGong();
-    return { awaitVideoEnd: true, activeSession: protectedSession };
+    return { awaitVideoEnd: true };
   }
 
-  const protectedSession = await switchToCleanProtectedSession(
-    session,
-    openReadSession,
-    "question read"
-  );
-  try {
-    await _runQuestionReadPhase(
-      protectedSession,
-      buildProtectedReadContext(gameContext),
-      buildVerbatimBaseInstructions()
-    );
-  } finally {
-    if (protectedSession !== session) {
-      try { protectedSession.close(); } catch {}
-    }
-  }
+  // ── Regular question read: attention cue → gong → question body ───────────
+  // No persona needed — model reads exact fixed text, character adds no value here.
+  await session.setMonologueMode({
+    tools: [],
+    instructions: buildVerbatimBaseInstructions(),
+  });
+
+  const attentionResponse = await session.createResponse({
+    instructions: buildAttentionCuePrompt(gameContext),
+    outputModalities: ["audio"],
+    metadata: { stage: "attention_cue" },
+    maxOutputTokens: TOKENS.ATTENTION_CUE,
+  });
+  console.log("[Realtime][Session1] attention cue created", { responseId: attentionResponse.responseId });
+  await waitForCompletedSpokenTurn(session, attentionResponse.responseId, "attention cue");
+  const attentionText = session.getResponseTranscript(attentionResponse.responseId);
+  console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (увага):", attentionText || "(no transcript)");
+
+  await playGong();
+
+  const questionResponse = await session.createResponse({
+    instructions: buildQuestionBodyPrompt(gameContext),
+    outputModalities: ["audio"],
+    metadata: { stage: "question_read" },
+    maxOutputTokens: "inf",
+  });
+  console.log("[Realtime][Session1] question body created", { responseId: questionResponse.responseId });
+  await waitForCompletedSpokenTurn(session, questionResponse.responseId, "question read");
+  const questionText = session.getResponseTranscript(questionResponse.responseId);
+  console.log("[DIALOGUE][Session1] ВЕДУЧИЙ (питання):", questionText || "(no transcript)");
+  console.log("[DIALOGUE][Session1] ──────────────────────────────────────");
+
   return { awaitVideoEnd: false };
 }
 
