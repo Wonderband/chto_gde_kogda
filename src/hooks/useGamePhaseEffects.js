@@ -808,11 +808,14 @@ export function useGamePhaseEffects({
       } catch (e) {
         console.error("[EXPLAINING effect]", e);
         try {
-          const fallbackAnswer = GAME_LANGUAGE === "ru"
-            ? `Правильный ответ: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`
-            : `Правильна відповідь: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`;
           if (!cancelled) {
-            await tts(fallbackAnswer, { voice: REALTIME_VOICE });
+            const fallbackText = [
+              GAME_LANGUAGE === "ru"
+                ? `Правильный ответ: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`
+                : `Правильна відповідь: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`,
+              buildScoreAnnouncementText(evaluation, score, GAME_LANGUAGE),
+            ].filter(Boolean).join(" ");
+            await tts(fallbackText, { voice: REALTIME_VOICE });
           }
         } catch (fallbackErr) {
           console.error("[EXPLAINING fallback failed]", fallbackErr);
