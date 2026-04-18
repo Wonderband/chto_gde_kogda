@@ -39,7 +39,8 @@ export const PLAYER_NAMES = (e.VITE_PLAYER_NAMES || "")
 
 // ─── AI models & voices ────────────────────────────────────────────────────
 /** OpenAI Realtime API model */
-export const REALTIME_MODEL = e.VITE_REALTIME_MODEL || "gpt-4o-mini-realtime-preview";
+export const REALTIME_MODEL =
+  e.VITE_REALTIME_MODEL || "gpt-4o-mini-realtime-preview";
 /** Realtime API voice (used for ALL live moderator speech) */
 export const REALTIME_VOICE = e.VITE_REALTIME_VOICE || "echo";
 /** TTS model for non-realtime announcements (Стоп!, mock mode).
@@ -50,6 +51,9 @@ export const TTS_MODEL = e.VITE_TTS_MODEL || "gpt-4o-mini-tts";
 export const TTS_VOICE = e.VITE_TTS_VOICE || "onyx";
 /** Extra playback gain for TTS audio (can be > 1.0 via Web Audio). */
 export const TTS_OUTPUT_GAIN = Number(e.VITE_TTS_OUTPUT_GAIN) || 1.65;
+/** Extra playback gain for Realtime API audio (WebRTC stream via Web Audio GainNode).
+ *  Set higher than TTS_OUTPUT_GAIN so the live moderator voice cuts through wheel music. */
+export const REALTIME_OUTPUT_GAIN = Number(e.VITE_REALTIME_OUTPUT_GAIN) || 1.22;
 /** Speech-to-text model for team answer transcription */
 export const TRANSCRIBE_MODEL =
   e.VITE_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";

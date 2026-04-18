@@ -384,18 +384,20 @@ export default function App() {
   const [introVisible, setIntroVisible] = useState(true);
   const [audioEnded, setAudioEnded] = useState(false);
 
-  // Register key listener only while intro is showing.
-  // Any keypress dismisses the intro — but only after audio has ended
-  // (or the user insists by pressing a second time before that).
+  // Dismiss intro on any keypress OR tap/click (so touchscreen devices work too).
   useEffect(() => {
     if (!introVisible) return;
-    function onKey(e) {
+    function dismiss(e) {
       e.preventDefault();
       e.stopImmediatePropagation();
       setIntroVisible(false);
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", dismiss);
+    window.addEventListener("pointerdown", dismiss);
+    return () => {
+      window.removeEventListener("keydown", dismiss);
+      window.removeEventListener("pointerdown", dismiss);
+    };
   }, [introVisible]);
 
   return (
@@ -440,7 +442,7 @@ export default function App() {
                 color: "rgba(201,168,76,0.85)",
                 animation: "introKeyBlink 1.4s ease-in-out infinite",
               }}>
-                Натисніть будь-яку клавішу
+                Натисніть будь-яку клавішу або торкніться екрана
               </div>
             )}
           </div>
