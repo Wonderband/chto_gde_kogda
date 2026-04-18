@@ -189,10 +189,18 @@ export function useGamePhaseEffects({
   const awaitingVideoEndRef = useRef(false);
   const videoFinishInFlightRef = useRef(false);
 
+  // Language instruction injected into every TTS call so gpt-4o-mini-tts
+  // always uses correct Ukrainian pronunciation (not English/Russian accent).
+  // tts-1 silently ignores the instructions field so this is safe regardless of model.
+  const TTS_LANG_INSTRUCTIONS =
+    GAME_LANGUAGE === "ru"
+      ? "Говори исключительно на русском языке с естественной русской интонацией."
+      : "Говори виключно українською мовою з природною українською інтонацією та вимовою.";
+
   async function tts(text, options = {}) {
     setTtsPlaying(true);
     try {
-      await speak(text, options);
+      await speak(text, { instructions: TTS_LANG_INSTRUCTIONS, ...options });
     } finally {
       setTtsPlaying(false);
     }
