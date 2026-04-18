@@ -189,15 +189,25 @@ export function useGamePhaseEffects({
   const awaitingVideoEndRef = useRef(false);
   const videoFinishInFlightRef = useRef(false);
 
+  // Language instruction injected into every TTS call so gpt-4o-mini-tts
+  // always uses correct Ukrainian pronunciation (not English/Russian accent).
+  // tts-1 silently ignores the instructions field so this is safe regardless of model.
+  const TTS_LANG_INSTRUCTIONS =
+    GAME_LANGUAGE === "ru"
+      ? "Говори исключительно на русском языке с естественной русской интонацией."
+      : "Говори виключно українською мовою з природною українською інтонацією та вимовою.";
+
   async function tts(text, options = {}) {
     setTtsPlaying(true);
     try {
-      await speak(text, options);
+      await speak(text, { instructions: TTS_LANG_INSTRUCTIONS, ...options });
     } finally {
       setTtsPlaying(false);
     }
   }
 
+  // Full context — only for the evaluator (Session 2 evaluation).
+  // Contains correct_answer and hint so the AI can judge the team's answer.
   function buildCtx(extra = {}) {
     return {
       round_number: roundNumber,
@@ -228,6 +238,26 @@ export function useGamePhaseEffects({
       game_language: GAME_LANGUAGE,
       retry_attempt: state.retryCount ?? 0,
       ...extra,
+    };
+  }
+
+  // Dialogue context — for warmup and listening-cue sessions only.
+  // Deliberately excludes correct_answer, hint_for_evaluator, answer_variants,
+  // and question_text so those fields can never reach a dialogue-phase prompt.
+  function buildDialogueCtx() {
+    return {
+      round_number: roundNumber,
+      sector_number: (selectedSector ?? 0) + 1,
+      game_language: GAME_LANGUAGE,
+      current_question: currentQuestion
+        ? {
+            character: currentQuestion.character,
+            intro_flavor: currentQuestion.intro_flavor,
+            item_to_announce: currentQuestion.item_to_announce,
+            round_type: currentQuestion.round_type,
+            blitz_position: currentQuestion.blitz_position,
+          }
+        : null,
     };
   }
 
@@ -309,8 +339,10 @@ export function useGamePhaseEffects({
         closePreSession();
 
         const session = new RealtimeSession();
-        session.onError = (err) =>
+        session.onError = (err) => {
           console.error("[Moderator session error]", err.message);
+          closePreSession();
+        };
         // NOTE: onTriggerPhrase intentionally NOT set here — trigger phrases
         // like "увага питання" must not interrupt the spinning dialogue.
 
@@ -401,24 +433,18 @@ export function useGamePhaseEffects({
           await tts(introLine, { voice: REALTIME_VOICE });
         }
 
-        // 2. Black box / item_announce structural cues + music via TTS
-        if (isBlackBox && !cancelled) {
-          await tts(blackBoxCue, { voice: REALTIME_VOICE });
-          if (!cancelled) await playBlackBoxMusic();
-        } else if (isItemAnnounce && !cancelled) {
-          await playBlackBoxMusic();
-          if (!cancelled && itemCue) await tts(itemCue, { voice: REALTIME_VOICE });
-        }
-
-        // 3. Warmup mini-dialog (Realtime, optional) — same format as spin dialog
+        // 2. Warmup mini-dialog (Realtime, optional) — runs before structural cues
+        //    so players are warmed up before the box/item is revealed
         if (!cancelled && !USE_MOCK && shouldWarmup) {
           const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
           if (apiKey && systemPromptRef.current) {
             let warmupSession = null;
             try {
               warmupSession = new RealtimeSession();
-              warmupSession.onError = (err) =>
+              warmupSession.onError = (err) => {
                 console.error("[Warmup session error]", err.message);
+                try { warmupSession?.close(); } catch {}
+              };
               await warmupSession.open({
                 apiKey,
                 systemPrompt: systemPromptRef.current,
@@ -429,7 +455,7 @@ export function useGamePhaseEffects({
                 await runSessionOneFlow({
                   session: warmupSession,
                   systemPrompt: systemPromptRef.current,
-                  gameContext: buildCtx(),
+                  gameContext: buildDialogueCtx(),
                   warmupTimeoutMs: 6000,
                 });
               }
@@ -439,6 +465,15 @@ export function useGamePhaseEffects({
               try { warmupSession?.close(); } catch {}
             }
           }
+        }
+
+        // 3. Structural cue → music (both black_box and item_announce: cue first, then music)
+        if (isBlackBox && !cancelled) {
+          await tts(blackBoxCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playBlackBoxMusic();
+        } else if (isItemAnnounce && !cancelled) {
+          if (itemCue) await tts(itemCue, { voice: REALTIME_VOICE });
+          if (!cancelled) await playBlackBoxMusic();
         }
 
         if (cancelled) return;
@@ -466,6 +501,8 @@ export function useGamePhaseEffects({
         if (!cancelled) send(EVENTS.READING_DONE);
       } catch (e) {
         console.error("[READING deterministic flow failed]", e);
+        // Guarantee progression — game must never stay stuck in READING
+        if (!cancelled) send(EVENTS.READING_DONE);
       }
     })();
 
@@ -529,8 +566,10 @@ export function useGamePhaseEffects({
               let session = postSessionRef.current;
               if (!session) {
                 session = new RealtimeSession();
-                session.onError = (err) =>
+                session.onError = (err) => {
                   console.error("[Session2 cue error]", err.message);
+                  closePostSession();
+                };
                 await session.open({
                   apiKey,
                   systemPrompt: systemPromptRef.current,
@@ -543,7 +582,7 @@ export function useGamePhaseEffects({
               await playListeningCue({
                 session,
                 systemPrompt: systemPromptRef.current,
-                gameContext: buildCtx(),
+                gameContext: buildDialogueCtx(),
                 earlyAnswer: state.earlyAnswer,
               });
             } else {
@@ -777,11 +816,14 @@ export function useGamePhaseEffects({
       } catch (e) {
         console.error("[EXPLAINING effect]", e);
         try {
-          const fallbackAnswer = GAME_LANGUAGE === "ru"
-            ? `Правильный ответ: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`
-            : `Правильна відповідь: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`;
           if (!cancelled) {
-            await tts(fallbackAnswer, { voice: REALTIME_VOICE });
+            const fallbackText = [
+              GAME_LANGUAGE === "ru"
+                ? `Правильный ответ: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`
+                : `Правильна відповідь: ${evaluation.correct_answer_reveal || currentQuestion?.answer || "?"}.`,
+              buildScoreAnnouncementText(evaluation, score, GAME_LANGUAGE),
+            ].filter(Boolean).join(" ");
+            await tts(fallbackText, { voice: REALTIME_VOICE });
           }
         } catch (fallbackErr) {
           console.error("[EXPLAINING fallback failed]", fallbackErr);

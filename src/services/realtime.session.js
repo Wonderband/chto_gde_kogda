@@ -10,7 +10,20 @@ import {
   withTimeout,
 } from "./realtime.shared.js";
 import { buildModeratorBaseInstructions } from "./realtime.prompts.js";
-import { GAME_LANGUAGE } from "../config.js";
+import { GAME_LANGUAGE, REALTIME_OUTPUT_GAIN } from "../config.js";
+
+// ─── Shared Web Audio context ─────────────────────────────────────────────────
+// One context is reused across all RealtimeSession instances so we never hit
+// Chrome's 6-context limit during a full game (one session per round).
+let _sharedAudioCtx = null;
+function getSharedAudioCtx() {
+  if (typeof window === "undefined") return null;
+  if (_sharedAudioCtx && _sharedAudioCtx.state !== "closed") return _sharedAudioCtx;
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) return null;
+  _sharedAudioCtx = new Ctor();
+  return _sharedAudioCtx;
+}
 
 const DEBUG_REALTIME =
   typeof import.meta !== "undefined" &&
@@ -54,6 +67,10 @@ export class RealtimeSession {
     this._inputTranscriptWaiters = [];
     this._pendingInputTranscript = null;
 
+    // Web Audio gain routing for volume boost
+    this._audioSource = null;
+    this._audioGainNode = null;
+
     this.onError = null;
     this.onSessionUpdated = null;
     this.onResponseCreated = null;
@@ -65,6 +82,27 @@ export class RealtimeSession {
     this.onUserSpeechStarted = null;
     this.onUserSpeechStopped = null;
     this.onRemoteTrack = null;
+  }
+
+  async _applyGainBoost() {
+    if (!REALTIME_OUTPUT_GAIN || REALTIME_OUTPUT_GAIN === 1 || !this._audioEl) return;
+    if (this._audioSource) return; // already wired
+    try {
+      const ctx = getSharedAudioCtx();
+      if (!ctx) return;
+      if (ctx.state === "suspended") {
+        await ctx.resume().catch(() => {});
+      }
+      this._audioSource = ctx.createMediaElementSource(this._audioEl);
+      this._audioGainNode = ctx.createGain();
+      this._audioGainNode.gain.value = REALTIME_OUTPUT_GAIN;
+      this._audioSource.connect(this._audioGainNode);
+      this._audioGainNode.connect(ctx.destination);
+    } catch (err) {
+      console.warn("[RealtimeSession] gain boost unavailable, using element volume", err);
+      // Fallback: clamp to 1.0 (HTML audio element max)
+      if (this._audioEl) this._audioEl.volume = Math.min(1, REALTIME_OUTPUT_GAIN);
+    }
   }
 
   _debugLog(...args) {
@@ -99,6 +137,9 @@ export class RealtimeSession {
         this._remoteTrackResolved = true;
         this._remoteTrackDeferred.resolve(event);
       }
+      // Apply gain boost — must come AFTER srcObject is set so createMediaElementSource
+      // can attach to the element. Fire-and-forget; errors are logged inside.
+      this._applyGainBoost().catch(() => {});
       try {
         const playPromise = this._audioEl?.play?.();
         if (playPromise?.catch) {
@@ -1001,6 +1042,11 @@ export class RealtimeSession {
     for (const list of this._transcriptMatchWaiters.values()) for (const { deferred } of list) try { deferred.reject(closeErr); } catch {}
     for (const { deferred } of this._toolWaiters) try { deferred.reject(closeErr); } catch {}
     for (const w of this._inputTranscriptWaiters) try { w.reject(closeErr); } catch {}
+
+    try { this._audioSource?.disconnect(); } catch {}
+    try { this._audioGainNode?.disconnect(); } catch {}
+    this._audioSource = null;
+    this._audioGainNode = null;
 
     try {
       this._dc?.close();
