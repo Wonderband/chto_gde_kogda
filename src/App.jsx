@@ -381,16 +381,32 @@ function Game() {
 }
 
 export default function App() {
-  const [introPlaying, setIntroPlaying] = useState(true);
+  const [introVisible, setIntroVisible] = useState(true);
+  const [audioEnded, setAudioEnded] = useState(false);
+
+  // Register key listener only while intro is showing.
+  // Any keypress dismisses the intro — but only after audio has ended
+  // (or the user insists by pressing a second time before that).
+  useEffect(() => {
+    if (!introVisible) return;
+    function onKey(e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setIntroVisible(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [introVisible]);
 
   return (
     <>
-      {introPlaying && (
+      {introVisible && (
         <>
+          {/* Hidden audio — plays intro music once */}
           <video
             src="/sounds/intro.mp4"
             autoPlay
-            onEnded={() => setIntroPlaying(false)}
+            onEnded={() => setAudioEnded(true)}
             style={{ display: "none" }}
           />
           <div
@@ -411,12 +427,33 @@ export default function App() {
                 display: "block",
               }}
             />
+            {audioEnded && (
+              <div style={{
+                position: "absolute",
+                bottom: "6%",
+                width: "100%",
+                textAlign: "center",
+                fontFamily: "Georgia, serif",
+                fontSize: "1.1rem",
+                letterSpacing: "0.25em",
+                textTransform: "uppercase",
+                color: "rgba(201,168,76,0.85)",
+                animation: "introKeyBlink 1.4s ease-in-out infinite",
+              }}>
+                Натисніть будь-яку клавішу
+              </div>
+            )}
           </div>
         </>
       )}
-      <GameProvider>
-        <Game />
-      </GameProvider>
+
+      {/* Game only mounts after intro is dismissed — prevents any
+          keyboard controls from firing while the splash screen is up */}
+      {!introVisible && (
+        <GameProvider>
+          <Game />
+        </GameProvider>
+      )}
     </>
   );
 }
